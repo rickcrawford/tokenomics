@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -24,6 +25,13 @@ import (
 	"github.com/rickcrawford/tokenomics/internal/store"
 	"github.com/rickcrawford/tokenomics/internal/tokencount"
 )
+
+// generateRequestID creates a unique request ID for upstream correlation.
+func generateRequestID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return fmt.Sprintf("tkn_%x", b)
+}
 
 type Handler struct {
 	store       store.TokenStore
@@ -309,6 +317,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		timeout = time.Duration(resolved.Timeout) * time.Second
 	}
 
+	// Generate a client request ID for upstream correlation
+	clientRequestID := generateRequestID()
+	logEntry.ClientRequestID = clientRequestID
+
 	// Try each model with retries
 	var lastResp *http.Response
 	var lastErr error
@@ -360,6 +372,7 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			copyHeaders(r.Header, proxyReq.Header)
 			proxyReq.Header.Set("Authorization", "Bearer "+realKey)
 			proxyReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
+			proxyReq.Header.Set("X-Client-Request-Id", clientRequestID)
 
 			client := &http.Client{}
 			resp, err := client.Do(proxyReq)
@@ -388,6 +401,9 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				logEntry.FallbackModel = tryModel
 			}
 
+			// Capture upstream provider request ID from response headers
+			logEntry.UpstreamRequestID = extractUpstreamRequestID(resp.Header)
+
 			h.sessions.AddUsage(tokenHash, int64(inputTokens))
 
 			// Record token usage for rate limiter
@@ -412,10 +428,11 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			}
 
 			if stream && resp.StatusCode == http.StatusOK {
-				outputTokens, assistantContent := h.handleStreamingResponse(w, resp, tokenHash, tryModel)
+				outputTokens, assistantContent, streamUpstreamID := h.handleStreamingResponse(w, resp, tokenHash, tryModel)
 				resp.Body.Close()
 				logEntry.StatusCode = resp.StatusCode
 				logEntry.OutputTokens = outputTokens
+				logEntry.UpstreamID = streamUpstreamID
 				h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, outputTokens, false)
 				h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, outputTokens)
 
@@ -444,6 +461,7 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			outputTokens := h.countResponseTokens(respBody, tokenHash)
 			logEntry.StatusCode = resp.StatusCode
 			logEntry.OutputTokens = outputTokens
+			logEntry.UpstreamID = extractUpstreamID(respBody)
 			h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, outputTokens)
 
 			isError := resp.StatusCode >= 400
@@ -502,11 +520,14 @@ func shouldRetry(cfg *policy.RetryConfig, statusCode int) bool {
 	return false
 }
 
-func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string) {
+// handleStreamingResponse streams the upstream SSE response to the client,
+// counting output tokens and extracting the upstream completion ID.
+// Returns (outputTokens, assistantContent, upstreamID).
+func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string, string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		httpError(w, http.StatusInternalServerError, "streaming not supported")
-		return 0, ""
+		return 0, "", ""
 	}
 
 	copyHeaders(resp.Header, w.Header())
@@ -518,6 +539,7 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 	scanner := bufio.NewScanner(resp.Body)
 	var totalOutputTokens int
 	var contentBuilder strings.Builder
+	var upstreamID string
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -536,6 +558,15 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 			var chunk map[string]interface{}
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 				continue
+			}
+
+			// Extract upstream ID from the first chunk
+			if upstreamID == "" {
+				if id, ok := chunk["id"].(string); ok {
+					upstreamID = id
+				} else if id, ok := chunk["responseId"].(string); ok {
+					upstreamID = id
+				}
 			}
 
 			// Count content tokens from delta
@@ -573,7 +604,7 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 		h.sessions.AddUsage(tokenHash, int64(totalOutputTokens))
 	}
 
-	return totalOutputTokens, contentBuilder.String()
+	return totalOutputTokens, contentBuilder.String(), upstreamID
 }
 
 func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time) {

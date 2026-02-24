@@ -27,6 +27,47 @@ type RequestLog struct {
 	RetryCount    int               `json:"retry_count,omitempty"`
 	FallbackModel string            `json:"fallback_model,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
+
+	// Upstream provider tracking IDs
+	UpstreamRequestID string `json:"upstream_request_id,omitempty"` // Provider's request ID from response header
+	UpstreamID        string `json:"upstream_id,omitempty"`         // Provider's response body ID (chatcmpl-*, msg_*, etc.)
+	ClientRequestID   string `json:"client_request_id,omitempty"`   // Our outbound tracking ID sent to provider
+}
+
+// extractUpstreamRequestID pulls the provider's request ID from response headers.
+// Supports OpenAI (x-request-id), Anthropic (request-id), Azure (apim-request-id),
+// and Mistral (Mistral-Correlation-Id).
+func extractUpstreamRequestID(h http.Header) string {
+	// Try provider-specific headers in priority order
+	for _, key := range []string{
+		"X-Request-Id",            // OpenAI, Azure OpenAI
+		"Request-Id",              // Anthropic
+		"Apim-Request-Id",         // Azure API Management
+		"Mistral-Correlation-Id",  // Mistral
+	} {
+		if v := h.Get(key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// extractUpstreamID pulls the provider's completion/message ID from the response body.
+// Returns the "id" field (e.g., "chatcmpl-...", "msg_...") or "responseId" for Gemini.
+func extractUpstreamID(body []byte) string {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return ""
+	}
+	// OpenAI, Anthropic, Cohere, Mistral all use "id"
+	if id, ok := resp["id"].(string); ok {
+		return id
+	}
+	// Google Gemini uses "responseId"
+	if id, ok := resp["responseId"].(string); ok {
+		return id
+	}
+	return ""
 }
 
 func logRequest(entry *RequestLog) {
