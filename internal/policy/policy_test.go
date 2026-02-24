@@ -139,13 +139,19 @@ func TestValidate(t *testing.T) {
 			wantErr: "invalid model_regex",
 		},
 		{
-			name:    "valid rules compile",
-			policy:  Policy{BaseKeyEnv: "K", Rules: []string{"foo", "bar.*baz"}},
+			name: "valid rules compile",
+			policy: Policy{BaseKeyEnv: "K", Rules: RuleList{
+				{Type: "regex", Pattern: "foo", Action: "fail"},
+				{Type: "regex", Pattern: "bar.*baz", Action: "fail"},
+			}},
 			wantErr: "",
 		},
 		{
-			name:    "invalid rule in list",
-			policy:  Policy{BaseKeyEnv: "K", Rules: []string{"good", "[bad"}},
+			name: "invalid rule in list",
+			policy: Policy{BaseKeyEnv: "K", Rules: RuleList{
+				{Type: "regex", Pattern: "good", Action: "fail"},
+				{Type: "regex", Pattern: "[bad", Action: "fail"},
+			}},
 			wantErr: "invalid rule regex",
 		},
 	}
@@ -173,7 +179,10 @@ func TestValidate_CompilesRegexes(t *testing.T) {
 	p := Policy{
 		BaseKeyEnv: "K",
 		ModelRegex: "^gpt-4.*$",
-		Rules:      []string{"secret", "password"},
+		Rules: RuleList{
+			{Type: "regex", Pattern: "secret", Action: "fail"},
+			{Type: "regex", Pattern: "password", Action: "fail"},
+		},
 	}
 	if err := p.Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -186,11 +195,12 @@ func TestValidate_CompilesRegexes(t *testing.T) {
 		t.Fatal("expected compiledModelRegex to match gpt-4-turbo")
 	}
 
-	rules := p.CompiledRules()
-	if len(rules) != 2 {
-		t.Fatalf("expected 2 compiled rules, got %d", len(rules))
+	if len(p.Rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(p.Rules))
 	}
-	if !rules[0].MatchString("this is a secret") {
+	// Verify rules were compiled by checking via CheckRules
+	err := p.CheckRules("this is a secret")
+	if err == nil {
 		t.Fatal("expected first rule to match 'this is a secret'")
 	}
 }
@@ -241,8 +251,8 @@ func TestParse_PreservesFields(t *testing.T) {
 	if p.Prompts[0].Role != "system" || p.Prompts[0].Content != "hello" {
 		t.Errorf("Prompts[0] = %+v, want role=system content=hello", p.Prompts[0])
 	}
-	if len(p.Rules) != 1 || p.Rules[0] != "blocked" {
-		t.Errorf("Rules = %v, want [blocked]", p.Rules)
+	if len(p.Rules) != 1 || p.Rules[0].Pattern != "blocked" {
+		t.Errorf("Rules = %v, want [{pattern:blocked}]", p.Rules)
 	}
 }
 
@@ -435,11 +445,11 @@ func TestResolveForModel_RuleMerging(t *testing.T) {
 	if len(resolved.Rules) != 2 {
 		t.Fatalf("expected 2 rules, got %d: %v", len(resolved.Rules), resolved.Rules)
 	}
-	if resolved.Rules[0] != "global_blocked" {
-		t.Errorf("first rule = %q, want %q", resolved.Rules[0], "global_blocked")
+	if resolved.Rules[0].Pattern != "global_blocked" {
+		t.Errorf("first rule pattern = %q, want %q", resolved.Rules[0].Pattern, "global_blocked")
 	}
-	if resolved.Rules[1] != "provider_blocked" {
-		t.Errorf("second rule = %q, want %q", resolved.Rules[1], "provider_blocked")
+	if resolved.Rules[1].Pattern != "provider_blocked" {
+		t.Errorf("second rule pattern = %q, want %q", resolved.Rules[1].Pattern, "provider_blocked")
 	}
 }
 

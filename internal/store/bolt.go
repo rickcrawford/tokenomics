@@ -367,7 +367,7 @@ func (s *BoltStore) Reload() error {
 // keyPrefix returns a safe prefix of the key for log messages.
 func keyPrefix(k []byte) string {
 	if len(k) > 8 {
-		return keyPrefix(k)
+		return string(k[:8])
 	}
 	return string(k)
 }

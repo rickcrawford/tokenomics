@@ -28,10 +28,20 @@ type RequestLog struct {
 	FallbackModel string            `json:"fallback_model,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 
+	// Rule match tracking
+	RuleMatches []RuleMatchLog `json:"rule_matches,omitempty"` // Non-blocking rule matches (warn, log, mask)
+
 	// Upstream provider tracking IDs
 	UpstreamRequestID string `json:"upstream_request_id,omitempty"` // Provider's request ID from response header
 	UpstreamID        string `json:"upstream_id,omitempty"`         // Provider's response body ID (chatcmpl-*, msg_*, etc.)
 	ClientRequestID   string `json:"client_request_id,omitempty"`   // Our outbound tracking ID sent to provider
+}
+
+// RuleMatchLog records a non-blocking rule match in the request log.
+type RuleMatchLog struct {
+	Name    string `json:"name,omitempty"`
+	Action  string `json:"action"`
+	Message string `json:"message"`
 }
 
 // extractUpstreamRequestID pulls the provider's request ID from response headers.

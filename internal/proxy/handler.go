@@ -261,9 +261,9 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Rules check on user messages
+	// Rules check on user messages (input scope)
 	messages, _ := reqBody["messages"].([]interface{})
-	for _, m := range messages {
+	for i, m := range messages {
 		msg, ok := m.(map[string]interface{})
 		if !ok {
 			continue
@@ -272,12 +272,46 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		if content == "" {
 			continue
 		}
-		if err := resolved.CheckRules(content); err != nil {
+
+		// Check rules — fail action returns an error, warn/log just return matches
+		matches, err := resolved.CheckRules(content, "input")
+		if err != nil {
+			// Record the policy violation (fail) matches in structured log
+			for _, match := range matches {
+				logEntry.RuleMatches = append(logEntry.RuleMatches, RuleMatchLog{
+					Name:    match.Name,
+					Action:  match.Action,
+					Message: match.Message,
+				})
+			}
+			log.Printf("[rule:fail] policy violation: %s (token=%s model=%s)", err.Error(), tokenHash[:16], model)
 			logEntry.StatusCode = http.StatusForbidden
 			logEntry.Error = err.Error()
 			httpError(w, http.StatusForbidden, err.Error())
 			h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, 0, 0, true)
 			return
+		}
+
+		// Record and log any warn/log matches
+		for _, match := range matches {
+			logEntry.RuleMatches = append(logEntry.RuleMatches, RuleMatchLog{
+				Name:    match.Name,
+				Action:  match.Action,
+				Message: match.Message,
+			})
+			log.Printf("[rule:%s] %s (token=%s model=%s)", match.Action, match.Message, tokenHash[:16], model)
+		}
+
+		// Apply mask rules: redact content before forwarding
+		masked := resolved.MaskContent(content, "input")
+		if masked != content {
+			msg["content"] = masked
+			messages[i] = msg
+			logEntry.RuleMatches = append(logEntry.RuleMatches, RuleMatchLog{
+				Action:  "mask",
+				Message: "content redacted before forwarding",
+			})
+			log.Printf("[rule:mask] content redacted (token=%s model=%s)", tokenHash[:16], model)
 		}
 	}
 
