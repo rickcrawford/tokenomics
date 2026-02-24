@@ -4,7 +4,7 @@ BINARY := tokenomics
 BUILD_DIR := ./bin
 
 build:
-	go build -o $(BUILD_DIR)/$(BINARY) ./cmd/tokenomics
+	go build -o $(BUILD_DIR)/$(BINARY) .
 
 run: build
 	$(BUILD_DIR)/$(BINARY) serve

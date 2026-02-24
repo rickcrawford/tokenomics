@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rickcrawford/tokenomics/internal/policy"
@@ -29,6 +30,10 @@ type Handler struct {
 	stats       *UsageStats
 	hashKey     []byte
 	upstreamURL string
+
+	memWriterMu    sync.Mutex
+	memWriters     map[string]session.MemoryWriter
+	redisMemWriter session.MemoryWriter
 }
 
 func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstreamURL string) *Handler {
@@ -38,12 +43,44 @@ func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstream
 		stats:       NewUsageStats(),
 		hashKey:     hashKey,
 		upstreamURL: upstreamURL,
+		memWriters:  make(map[string]session.MemoryWriter),
 	}
 }
 
 // Stats returns the UsageStats for registering the stats endpoint.
 func (h *Handler) Stats() *UsageStats {
 	return h.stats
+}
+
+// SetRedisMemoryWriter sets the Redis-backed memory writer for session logging.
+func (h *Handler) SetRedisMemoryWriter(w session.MemoryWriter) {
+	h.redisMemWriter = w
+}
+
+// getMemoryWriter returns the appropriate memory writer for the given config.
+// Returns nil if memory is disabled.
+func (h *Handler) getMemoryWriter(mc policy.MemoryConfig) session.MemoryWriter {
+	if !mc.Enabled {
+		return nil
+	}
+	if mc.FilePath != "" {
+		h.memWriterMu.Lock()
+		defer h.memWriterMu.Unlock()
+		if w, ok := h.memWriters[mc.FilePath]; ok {
+			return w
+		}
+		w, err := session.NewFileMemoryWriter(mc.FilePath)
+		if err != nil {
+			log.Printf("failed to create file memory writer for %q: %v", mc.FilePath, err)
+			return nil
+		}
+		h.memWriters[mc.FilePath] = w
+		return w
+	}
+	if mc.Redis && h.redisMemWriter != nil {
+		return h.redisMemWriter
+	}
+	return nil
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -103,13 +140,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine upstream URL (policy override > global default)
+	// Default upstream from global config
 	upstream := h.upstreamURL
 	if pol.UpstreamURL != "" {
 		upstream = pol.UpstreamURL
 	}
 
-	// For chat completions, apply policy engine
+	// For chat completions, apply policy engine with multi-provider resolution
 	if isChatCompletions(r.URL.Path) {
 		h.handleChatCompletions(w, r, pol, tokenHash, upstream, start)
 		return
@@ -121,14 +158,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time) {
 	logEntry := &RequestLog{
-		Timestamp:   start.UTC().Format(time.RFC3339Nano),
-		Method:      r.Method,
-		Path:        r.URL.Path,
-		TokenHash:   tokenHash[:16],
-		BaseKeyEnv:  pol.BaseKeyEnv,
-		UpstreamURL: upstream,
-		RemoteAddr:  r.RemoteAddr,
-		UserAgent:   r.UserAgent(),
+		Timestamp:  start.UTC().Format(time.RFC3339Nano),
+		Method:     r.Method,
+		Path:       r.URL.Path,
+		TokenHash:  tokenHash[:16],
+		RemoteAddr: r.RemoteAddr,
+		UserAgent:  r.UserAgent(),
 	}
 	defer func() {
 		logEntry.DurationMs = time.Since(start).Milliseconds()
@@ -153,14 +188,25 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Model check
+	// Extract model and resolve multi-provider policy
 	model, _ := reqBody["model"].(string)
 	logEntry.Model = model
-	if err := pol.CheckModel(model); err != nil {
+
+	resolved := pol.ResolveForModel(model)
+
+	// Override upstream with resolved policy if set
+	if resolved.UpstreamURL != "" {
+		upstream = resolved.UpstreamURL
+	}
+	logEntry.BaseKeyEnv = resolved.BaseKeyEnv
+	logEntry.UpstreamURL = upstream
+
+	// Model check
+	if err := resolved.CheckModel(model); err != nil {
 		logEntry.StatusCode = http.StatusForbidden
 		logEntry.Error = err.Error()
 		httpError(w, http.StatusForbidden, err.Error())
-		h.stats.Record(tokenHash, model, pol.BaseKeyEnv, 0, 0, true)
+		h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, 0, 0, true)
 		return
 	}
 
@@ -175,11 +221,11 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		if content == "" {
 			continue
 		}
-		if err := pol.CheckRules(content); err != nil {
+		if err := resolved.CheckRules(content); err != nil {
 			logEntry.StatusCode = http.StatusForbidden
 			logEntry.Error = err.Error()
 			httpError(w, http.StatusForbidden, err.Error())
-			h.stats.Record(tokenHash, model, pol.BaseKeyEnv, 0, 0, true)
+			h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, 0, 0, true)
 			return
 		}
 	}
@@ -192,8 +238,8 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 
-	// Inject prompts
-	typedMessages = pol.InjectPrompts(typedMessages)
+	// Inject prompts from resolved policy
+	typedMessages = resolved.InjectPrompts(typedMessages)
 
 	// Count input tokens and check budget
 	inputTokens, err := tokencount.CountMessages(model, typedMessages)
@@ -203,13 +249,13 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	}
 	logEntry.InputTokens = inputTokens
 
-	if pol.MaxTokens > 0 {
+	if resolved.MaxTokens > 0 {
 		usage, _ := h.sessions.GetUsage(tokenHash)
-		if usage+int64(inputTokens) > pol.MaxTokens {
+		if usage+int64(inputTokens) > resolved.MaxTokens {
 			logEntry.StatusCode = http.StatusTooManyRequests
-			logEntry.Error = fmt.Sprintf("budget exceeded: used %d + input %d > limit %d", usage, inputTokens, pol.MaxTokens)
+			logEntry.Error = fmt.Sprintf("budget exceeded: used %d + input %d > limit %d", usage, inputTokens, resolved.MaxTokens)
 			httpError(w, http.StatusTooManyRequests, logEntry.Error)
-			h.stats.Record(tokenHash, model, pol.BaseKeyEnv, inputTokens, 0, true)
+			h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, 0, true)
 			return
 		}
 	}
@@ -230,10 +276,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Resolve the real API key from env
-	realKey := os.Getenv(pol.BaseKeyEnv)
+	realKey := os.Getenv(resolved.BaseKeyEnv)
 	if realKey == "" {
 		logEntry.StatusCode = http.StatusInternalServerError
-		logEntry.Error = fmt.Sprintf("base key env %q is not set", pol.BaseKeyEnv)
+		logEntry.Error = fmt.Sprintf("base key env %q is not set", resolved.BaseKeyEnv)
 		httpError(w, http.StatusInternalServerError, logEntry.Error)
 		return
 	}
@@ -273,7 +319,7 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		logEntry.StatusCode = http.StatusBadGateway
 		logEntry.Error = "upstream request failed"
 		httpError(w, http.StatusBadGateway, logEntry.Error)
-		h.stats.Record(tokenHash, model, pol.BaseKeyEnv, inputTokens, 0, true)
+		h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, 0, true)
 		return
 	}
 	defer resp.Body.Close()
@@ -281,11 +327,39 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	// Track input tokens
 	h.sessions.AddUsage(tokenHash, int64(inputTokens))
 
+	// Collect user content for memory logging
+	var userContent string
+	if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+		var parts []string
+		for _, m := range messages {
+			msg, ok := m.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			role, _ := msg["role"].(string)
+			content, _ := msg["content"].(string)
+			if content != "" && role == "user" {
+				parts = append(parts, content)
+			}
+		}
+		userContent = strings.Join(parts, "\n\n")
+	}
+
 	if stream && resp.StatusCode == http.StatusOK {
-		outputTokens := h.handleStreamingResponse(w, resp, tokenHash, model)
+		outputTokens, assistantContent := h.handleStreamingResponse(w, resp, tokenHash, model)
 		logEntry.StatusCode = resp.StatusCode
 		logEntry.OutputTokens = outputTokens
-		h.stats.Record(tokenHash, model, pol.BaseKeyEnv, inputTokens, outputTokens, false)
+		h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, outputTokens, false)
+
+		// Write conversation to memory
+		if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+			if userContent != "" {
+				memWriter.Append(tokenHash, "user", model, userContent)
+			}
+			if assistantContent != "" {
+				memWriter.Append(tokenHash, "assistant", model, assistantContent)
+			}
+		}
 		return
 	}
 
@@ -295,7 +369,7 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		logEntry.StatusCode = http.StatusBadGateway
 		logEntry.Error = "failed to read upstream response"
 		httpError(w, http.StatusBadGateway, logEntry.Error)
-		h.stats.Record(tokenHash, model, pol.BaseKeyEnv, inputTokens, 0, true)
+		h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, 0, true)
 		return
 	}
 
@@ -305,7 +379,20 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	logEntry.OutputTokens = outputTokens
 
 	isError := resp.StatusCode >= 400
-	h.stats.Record(tokenHash, model, pol.BaseKeyEnv, inputTokens, outputTokens, isError)
+	h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, outputTokens, isError)
+
+	// Write conversation to memory
+	if !isError {
+		if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+			if userContent != "" {
+				memWriter.Append(tokenHash, "user", model, userContent)
+			}
+			assistantContent := extractAssistantContent(respBody)
+			if assistantContent != "" {
+				memWriter.Append(tokenHash, "assistant", model, assistantContent)
+			}
+		}
+	}
 
 	// Write response
 	copyHeaders(resp.Header, w.Header())
@@ -313,11 +400,11 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	w.Write(respBody)
 }
 
-func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) int {
+func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		httpError(w, http.StatusInternalServerError, "streaming not supported")
-		return 0
+		return 0, ""
 	}
 
 	copyHeaders(resp.Header, w.Header())
@@ -328,6 +415,7 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 
 	scanner := bufio.NewScanner(resp.Body)
 	var totalOutputTokens int
+	var contentBuilder strings.Builder
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -361,6 +449,7 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 					}
 					content, _ := delta["content"].(string)
 					if content != "" {
+						contentBuilder.WriteString(content)
 						n, err := tokencount.Count(model, content)
 						if err == nil {
 							totalOutputTokens += n
@@ -382,16 +471,18 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 		h.sessions.AddUsage(tokenHash, int64(totalOutputTokens))
 	}
 
-	return totalOutputTokens
+	return totalOutputTokens, contentBuilder.String()
 }
 
 func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time) {
+	resolved := pol.ResolveProvider("")
+
 	logEntry := &RequestLog{
 		Timestamp:   start.UTC().Format(time.RFC3339Nano),
 		Method:      r.Method,
 		Path:        r.URL.Path,
 		TokenHash:   tokenHash[:16],
-		BaseKeyEnv:  pol.BaseKeyEnv,
+		BaseKeyEnv:  resolved.BaseKeyEnv,
 		UpstreamURL: upstream,
 		RemoteAddr:  r.RemoteAddr,
 		UserAgent:   r.UserAgent(),
@@ -401,10 +492,10 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 		logRequest(logEntry)
 	}()
 
-	realKey := os.Getenv(pol.BaseKeyEnv)
+	realKey := os.Getenv(resolved.BaseKeyEnv)
 	if realKey == "" {
 		logEntry.StatusCode = http.StatusInternalServerError
-		logEntry.Error = fmt.Sprintf("base key env %q is not set", pol.BaseKeyEnv)
+		logEntry.Error = fmt.Sprintf("base key env %q is not set", resolved.BaseKeyEnv)
 		httpError(w, http.StatusInternalServerError, logEntry.Error)
 		return
 	}
@@ -455,6 +546,27 @@ func (h *Handler) countResponseTokens(body []byte, tokenHash string) int {
 		h.sessions.AddUsage(tokenHash, int64(completionTokens))
 	}
 	return int(completionTokens)
+}
+
+func extractAssistantContent(body []byte) string {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return ""
+	}
+	choices, ok := resp["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return ""
+	}
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	msg, ok := choice["message"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	content, _ := msg["content"].(string)
+	return content
 }
 
 func isChatCompletions(path string) bool {

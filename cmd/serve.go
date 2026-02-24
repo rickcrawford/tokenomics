@@ -1,4 +1,4 @@
-package cli
+package cmd
 
 import (
 	"context"
@@ -68,6 +68,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create proxy handler
 	handler := proxy.NewHandler(tokenStore, sessStore, hashKey, cfg.Server.UpstreamURL)
+
+	// Wire up Redis memory writer if Redis session backend is configured
+	if rs, ok := sessStore.(*session.RedisStore); ok {
+		handler.SetRedisMemoryWriter(session.NewRedisMemoryWriter(rs.Client()))
+	}
 
 	// Build chi router with common middleware
 	r := chi.NewRouter()

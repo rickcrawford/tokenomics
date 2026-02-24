@@ -1,4 +1,4 @@
-package cli
+package cmd
 
 import (
 	"encoding/json"
@@ -46,9 +46,10 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 }
 
-type envPair struct {
-	key   string
-	value string
+// EnvPair represents a key-value pair for environment variable output.
+type EnvPair struct {
+	Key   string
+	Value string
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -58,64 +59,67 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	baseURL := fmt.Sprintf("%s://%s:%d", scheme, initHost, initPort)
 
-	pairs := resolveEnvPairs(initCLI, initToken, baseURL)
+	pairs := ResolveEnvPairs(initCLI, initToken, baseURL, initEnvKey, initEnvBase)
 
 	if initInsecure {
-		pairs = append(pairs, envPair{"NODE_TLS_REJECT_UNAUTHORIZED", "0"})
+		pairs = append(pairs, EnvPair{"NODE_TLS_REJECT_UNAUTHORIZED", "0"})
 	}
 
 	switch initOutputFmt {
 	case "shell":
-		return outputShell(pairs)
+		return OutputShell(pairs, os.Stdout)
 	case "dotenv":
-		return outputDotenv(pairs, initDotenv)
+		return OutputDotenv(pairs, initDotenv)
 	case "json":
-		return outputJSON(pairs)
+		return OutputJSON(pairs, os.Stdout)
 	default:
 		return fmt.Errorf("unknown output format: %s", initOutputFmt)
 	}
 }
 
-func resolveEnvPairs(cli, token, baseURL string) []envPair {
-	if initEnvKey != "" && initEnvBase != "" {
-		return []envPair{
-			{initEnvKey, token},
-			{initEnvBase, baseURL},
+// ResolveEnvPairs determines the environment variable pairs for the given CLI target.
+func ResolveEnvPairs(cli, token, baseURL, envKey, envBase string) []EnvPair {
+	if envKey != "" && envBase != "" {
+		return []EnvPair{
+			{envKey, token},
+			{envBase, baseURL},
 		}
 	}
 
 	switch strings.ToLower(cli) {
 	case "anthropic":
-		return []envPair{
+		return []EnvPair{
 			{"ANTHROPIC_API_KEY", token},
 			{"ANTHROPIC_BASE_URL", baseURL},
 		}
 	case "azure":
-		return []envPair{
+		return []EnvPair{
 			{"AZURE_OPENAI_API_KEY", token},
 			{"AZURE_OPENAI_ENDPOINT", baseURL},
 		}
 	case "gemini":
-		return []envPair{
+		return []EnvPair{
 			{"GEMINI_API_KEY", token},
 			{"GEMINI_BASE_URL", baseURL},
 		}
 	default: // generic / openai
-		return []envPair{
+		return []EnvPair{
 			{"OPENAI_API_KEY", token},
 			{"OPENAI_BASE_URL", baseURL + "/v1"},
 		}
 	}
 }
 
-func outputShell(pairs []envPair) error {
+// OutputShell writes export statements to the given writer.
+func OutputShell(pairs []EnvPair, w *os.File) error {
 	for _, p := range pairs {
-		fmt.Printf("export %s=%q\n", p.key, p.value)
+		fmt.Fprintf(w, "export %s=%q\n", p.Key, p.Value)
 	}
 	return nil
 }
 
-func outputDotenv(pairs []envPair, path string) error {
+// OutputDotenv writes or updates a .env file at the given path.
+func OutputDotenv(pairs []EnvPair, path string) error {
 	if path == "" {
 		path = ".env"
 	}
@@ -132,17 +136,17 @@ func outputDotenv(pairs []envPair, path string) error {
 	// Update existing lines
 	for i, line := range lines {
 		for _, p := range pairs {
-			if strings.HasPrefix(line, p.key+"=") {
-				lines[i] = fmt.Sprintf("%s=%q", p.key, p.value)
-				setKeys[p.key] = true
+			if strings.HasPrefix(line, p.Key+"=") {
+				lines[i] = fmt.Sprintf("%s=%q", p.Key, p.Value)
+				setKeys[p.Key] = true
 			}
 		}
 	}
 
 	// Append new keys
 	for _, p := range pairs {
-		if !setKeys[p.key] {
-			lines = append(lines, fmt.Sprintf("%s=%q", p.key, p.value))
+		if !setKeys[p.Key] {
+			lines = append(lines, fmt.Sprintf("%s=%q", p.Key, p.Value))
 		}
 	}
 
@@ -159,12 +163,13 @@ func outputDotenv(pairs []envPair, path string) error {
 	return nil
 }
 
-func outputJSON(pairs []envPair) error {
+// OutputJSON writes environment pairs as JSON to the given writer.
+func OutputJSON(pairs []EnvPair, w *os.File) error {
 	m := make(map[string]string)
 	for _, p := range pairs {
-		m[p.key] = p.value
+		m[p.Key] = p.Value
 	}
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(m)
 }

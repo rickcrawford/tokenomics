@@ -53,6 +53,11 @@ func (r *RedisStore) Reset(tokenHash string) error {
 	return nil
 }
 
+// Client returns the underlying Redis client for shared use (e.g., memory writers).
+func (r *RedisStore) Client() *redis.Client {
+	return r.client
+}
+
 func (r *RedisStore) Close() error {
 	return r.client.Close()
 }

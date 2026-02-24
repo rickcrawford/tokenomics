@@ -1,0 +1,121 @@
+# Token Management
+
+Wrapper tokens are the credentials you hand out instead of real API keys. Each token is a unique, one-time-visible string that maps to a policy stored in the database.
+
+## Token Format
+
+Tokens follow the format `tkn_<uuid>`, for example:
+
+```
+tkn_a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
+
+The raw token is shown exactly once at creation time. It is never stored -- only its HMAC-SHA256 hash is persisted in the database.
+
+## Hashing
+
+Tokenomics hashes tokens using HMAC-SHA256 with a secret key. The key is read from the environment variable named in `security.hash_key_env` (default: `TOKENOMICS_HASH_KEY`).
+
+```
+HMAC-SHA256(token, key) -> hex-encoded hash
+```
+
+If `TOKENOMICS_HASH_KEY` is not set, a built-in default key is used. **Always set a custom key in production.**
+
+When the proxy receives a request, it hashes the incoming token with the same key and looks up the resulting hash in the database to find the associated policy.
+
+## Creating Tokens
+
+```bash
+./bin/tokenomics token create --policy '<policy-json>'
+```
+
+The `--policy` flag is required and takes a JSON string. See [Policies](POLICIES.md) for the full schema.
+
+Example:
+
+```bash
+export TOKENOMICS_HASH_KEY="my-secret-hash-key"
+
+./bin/tokenomics token create --policy '{
+  "base_key_env": "OPENAI_API_KEY",
+  "max_tokens": 100000,
+  "model_regex": "^gpt-4.*"
+}'
+```
+
+Output:
+
+```
+Token created successfully.
+WARNING: This token will only be shown once. Store it securely.
+
+  Token: tkn_a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  Hash:  9f86d0818...
+```
+
+Save the `Token` value immediately. It cannot be recovered later. The `Hash` value is what gets stored in the database and appears in `token list` output.
+
+## Listing Tokens
+
+```bash
+./bin/tokenomics token list
+```
+
+Displays all stored token hashes along with their policy details:
+
+```
+Hash:       9f86d0818...
+Created:    2025-01-15 10:30:00 +0000 UTC
+Key Env:    OPENAI_API_KEY
+Model Regex: ^gpt-4.*
+Max Tokens: 100000
+Prompts:    0
+Rules:      0
+---
+```
+
+Fields shown per token:
+
+| Field | Description |
+|-------|-------------|
+| Hash | The HMAC-SHA256 hash (the database key) |
+| Created | Timestamp when the token was created |
+| Key Env | The `base_key_env` from the policy |
+| Upstream | The `upstream_url` (only shown if set) |
+| Model | The exact `model` restriction (only shown if set) |
+| Model Regex | The `model_regex` pattern (only shown if set) |
+| Max Tokens | The token budget (only shown if set) |
+| Prompts | Number of injected prompt messages |
+| Rules | Number of content-blocking rules |
+
+## Deleting Tokens
+
+```bash
+./bin/tokenomics token delete --hash <hash>
+```
+
+The `--hash` flag takes the hex-encoded hash shown during creation or in `token list` output.
+
+Example:
+
+```bash
+./bin/tokenomics token delete --hash 9f86d0818...
+```
+
+Output:
+
+```
+Token deleted.
+```
+
+Once deleted, any requests using that token will be rejected immediately.
+
+## Global Flags
+
+All token subcommands accept the global flags:
+
+| Flag | Description |
+|------|-------------|
+| `--config <path>` | Path to config file |
+| `--db <path>` | Database path (overrides config) |
