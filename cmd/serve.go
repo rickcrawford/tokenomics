@@ -42,8 +42,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		dbFile = dbPath
 	}
 
-	// Init token store
-	tokenStore := store.NewBoltStore(dbFile)
+	// Init token store (with optional at-rest encryption)
+	encKey := os.Getenv(cfg.Security.EncryptionKeyEnv)
+	tokenStore := store.NewBoltStore(dbFile, encKey)
 	if err := tokenStore.Init(); err != nil {
 		return fmt.Errorf("init store: %w", err)
 	}

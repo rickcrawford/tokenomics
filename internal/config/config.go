@@ -58,7 +58,8 @@ type RedisConfig struct {
 }
 
 type SecurityConfig struct {
-	HashKeyEnv string `mapstructure:"hash_key_env"`
+	HashKeyEnv       string `mapstructure:"hash_key_env"`
+	EncryptionKeyEnv string `mapstructure:"encryption_key_env"`
 }
 
 func Load(cfgFile string) (*Config, error) {
@@ -83,6 +84,7 @@ func Load(cfgFile string) (*Config, error) {
 	viper.SetDefault("session.redis.addr", "localhost:6379")
 	viper.SetDefault("session.redis.db", 0)
 	viper.SetDefault("security.hash_key_env", "TOKENOMICS_HASH_KEY")
+	viper.SetDefault("security.encryption_key_env", "TOKENOMICS_ENCRYPTION_KEY")
 
 	viper.SetEnvPrefix("TOKENOMICS")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

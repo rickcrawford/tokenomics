@@ -22,7 +22,7 @@ type mockTokenStore struct {
 func (m *mockTokenStore) Init() error                        { return nil }
 func (m *mockTokenStore) Close() error                       { return nil }
 func (m *mockTokenStore) Reload() error                      { return nil }
-func (m *mockTokenStore) Create(hash string, polJSON string) error {
+func (m *mockTokenStore) Create(hash string, polJSON string, expiresAt string) error {
 	p, err := policy.Parse(polJSON)
 	if err != nil {
 		return err
@@ -30,6 +30,8 @@ func (m *mockTokenStore) Create(hash string, polJSON string) error {
 	m.tokens[hash] = p
 	return nil
 }
+func (m *mockTokenStore) Get(hash string) (*store.TokenRecord, error) { return nil, nil }
+func (m *mockTokenStore) Update(hash string, polJSON string, expiresAt string) error { return nil }
 func (m *mockTokenStore) Delete(hash string) error              { delete(m.tokens, hash); return nil }
 func (m *mockTokenStore) List() ([]store.TokenRecord, error)    { return nil, nil }
 func (m *mockTokenStore) Lookup(hash string) (*policy.Policy, error) {
