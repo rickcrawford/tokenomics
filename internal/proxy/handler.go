@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -28,6 +29,7 @@ type Handler struct {
 	store       store.TokenStore
 	sessions    session.Store
 	stats       *UsageStats
+	rateLimiter *RateLimiter
 	hashKey     []byte
 	upstreamURL string
 
@@ -41,6 +43,7 @@ func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstream
 		store:       s,
 		sessions:    sess,
 		stats:       NewUsageStats(),
+		rateLimiter: NewRateLimiter(),
 		hashKey:     hashKey,
 		upstreamURL: upstreamURL,
 		memWriters:  make(map[string]session.MemoryWriter),
@@ -194,12 +197,30 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 	resolved := pol.ResolveForModel(model)
 
+	// Attach metadata to log entry
+	if len(resolved.Metadata) > 0 {
+		logEntry.Metadata = resolved.Metadata
+	}
+
 	// Override upstream with resolved policy if set
 	if resolved.UpstreamURL != "" {
 		upstream = resolved.UpstreamURL
 	}
 	logEntry.BaseKeyEnv = resolved.BaseKeyEnv
 	logEntry.UpstreamURL = upstream
+
+	// Rate limit check
+	if err := h.rateLimiter.Allow(tokenHash, resolved.RateLimit); err != nil {
+		logEntry.StatusCode = http.StatusTooManyRequests
+		logEntry.Error = err.Error()
+		httpError(w, http.StatusTooManyRequests, err.Error())
+		h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, 0, 0, true)
+		return
+	}
+
+	// Track parallel requests
+	h.rateLimiter.Acquire(tokenHash, resolved.RateLimit)
+	defer h.rateLimiter.Release(tokenHash, resolved.RateLimit)
 
 	// Model check
 	if err := resolved.CheckModel(model); err != nil {
@@ -267,137 +288,218 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	}
 	reqBody["messages"] = interfaceMessages
 
-	newBody, err := json.Marshal(reqBody)
-	if err != nil {
-		logEntry.StatusCode = http.StatusInternalServerError
-		logEntry.Error = "failed to marshal request"
-		httpError(w, http.StatusInternalServerError, logEntry.Error)
-		return
-	}
-
-	// Resolve the real API key from env
-	realKey := os.Getenv(resolved.BaseKeyEnv)
-	if realKey == "" {
-		logEntry.StatusCode = http.StatusInternalServerError
-		logEntry.Error = fmt.Sprintf("base key env %q is not set", resolved.BaseKeyEnv)
-		httpError(w, http.StatusInternalServerError, logEntry.Error)
-		return
-	}
-
 	// Check if streaming
 	stream, _ := reqBody["stream"].(bool)
 	logEntry.Stream = stream
 
-	// Build upstream request
-	upstreamURL, err := url.Parse(upstream)
-	if err != nil {
-		logEntry.StatusCode = http.StatusInternalServerError
-		logEntry.Error = "invalid upstream URL"
-		httpError(w, http.StatusInternalServerError, logEntry.Error)
-		return
-	}
-	upstreamURL.Path = r.URL.Path
-	upstreamURL.RawQuery = r.URL.RawQuery
-
-	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL.String(), bytes.NewReader(newBody))
-	if err != nil {
-		logEntry.StatusCode = http.StatusInternalServerError
-		logEntry.Error = "failed to create upstream request"
-		httpError(w, http.StatusInternalServerError, logEntry.Error)
-		return
+	// Build the model list for retry/fallback: primary model first, then fallbacks
+	modelsToTry := []string{model}
+	if resolved.Retry != nil && len(resolved.Retry.Fallbacks) > 0 {
+		modelsToTry = append(modelsToTry, resolved.Retry.Fallbacks...)
 	}
 
-	// Copy headers, replacing auth
-	copyHeaders(r.Header, proxyReq.Header)
-	proxyReq.Header.Set("Authorization", "Bearer "+realKey)
-	proxyReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
-
-	// Send to upstream
-	client := &http.Client{}
-	resp, err := client.Do(proxyReq)
-	if err != nil {
-		logEntry.StatusCode = http.StatusBadGateway
-		logEntry.Error = "upstream request failed"
-		httpError(w, http.StatusBadGateway, logEntry.Error)
-		h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, 0, true)
-		return
+	maxAttempts := 1
+	if resolved.Retry != nil && resolved.Retry.MaxRetries > 0 {
+		maxAttempts = 1 + resolved.Retry.MaxRetries
 	}
-	defer resp.Body.Close()
 
-	// Track input tokens
-	h.sessions.AddUsage(tokenHash, int64(inputTokens))
+	// Determine timeout
+	timeout := 30 * time.Second // default
+	if resolved.Timeout > 0 {
+		timeout = time.Duration(resolved.Timeout) * time.Second
+	}
 
-	// Collect user content for memory logging
-	var userContent string
-	if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
-		var parts []string
-		for _, m := range messages {
-			msg, ok := m.(map[string]interface{})
-			if !ok {
+	// Try each model with retries
+	var lastResp *http.Response
+	var lastErr error
+	var lastBody []byte
+	retryCount := 0
+
+	for _, tryModel := range modelsToTry {
+		reqBody["model"] = tryModel
+
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			newBody, err := json.Marshal(reqBody)
+			if err != nil {
+				logEntry.StatusCode = http.StatusInternalServerError
+				logEntry.Error = "failed to marshal request"
+				httpError(w, http.StatusInternalServerError, logEntry.Error)
+				return
+			}
+
+			// Resolve the real API key from env
+			realKey := os.Getenv(resolved.BaseKeyEnv)
+			if realKey == "" {
+				logEntry.StatusCode = http.StatusInternalServerError
+				logEntry.Error = fmt.Sprintf("base key env %q is not set", resolved.BaseKeyEnv)
+				httpError(w, http.StatusInternalServerError, logEntry.Error)
+				return
+			}
+
+			// Build upstream request with timeout
+			upstreamURL, err := url.Parse(upstream)
+			if err != nil {
+				logEntry.StatusCode = http.StatusInternalServerError
+				logEntry.Error = "invalid upstream URL"
+				httpError(w, http.StatusInternalServerError, logEntry.Error)
+				return
+			}
+			upstreamURL.Path = r.URL.Path
+			upstreamURL.RawQuery = r.URL.RawQuery
+
+			ctx, cancel := context.WithTimeout(r.Context(), timeout)
+			proxyReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), bytes.NewReader(newBody))
+			if err != nil {
+				cancel()
+				logEntry.StatusCode = http.StatusInternalServerError
+				logEntry.Error = "failed to create upstream request"
+				httpError(w, http.StatusInternalServerError, logEntry.Error)
+				return
+			}
+
+			copyHeaders(r.Header, proxyReq.Header)
+			proxyReq.Header.Set("Authorization", "Bearer "+realKey)
+			proxyReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
+
+			client := &http.Client{}
+			resp, err := client.Do(proxyReq)
+			if err != nil {
+				cancel()
+				lastErr = err
+				retryCount++
 				continue
 			}
-			role, _ := msg["role"].(string)
-			content, _ := msg["content"].(string)
-			if content != "" && role == "user" {
-				parts = append(parts, content)
+
+			// Check if we should retry based on status code
+			if shouldRetry(resolved.Retry, resp.StatusCode) && (attempt < maxAttempts-1 || tryModel != modelsToTry[len(modelsToTry)-1]) {
+				respBody, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				cancel()
+				lastBody = respBody
+				lastResp = resp
+				retryCount++
+				continue
 			}
+
+			// Success or non-retryable error — use this response
+			cancel()
+			logEntry.RetryCount = retryCount
+			if tryModel != model {
+				logEntry.FallbackModel = tryModel
+			}
+
+			h.sessions.AddUsage(tokenHash, int64(inputTokens))
+
+			// Record token usage for rate limiter
+			h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, inputTokens)
+
+			// Collect user content for memory logging
+			var userContent string
+			if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+				var parts []string
+				for _, m := range messages {
+					msg, ok := m.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					role, _ := msg["role"].(string)
+					content, _ := msg["content"].(string)
+					if content != "" && role == "user" {
+						parts = append(parts, content)
+					}
+				}
+				userContent = strings.Join(parts, "\n\n")
+			}
+
+			if stream && resp.StatusCode == http.StatusOK {
+				outputTokens, assistantContent := h.handleStreamingResponse(w, resp, tokenHash, tryModel)
+				resp.Body.Close()
+				logEntry.StatusCode = resp.StatusCode
+				logEntry.OutputTokens = outputTokens
+				h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, outputTokens, false)
+				h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, outputTokens)
+
+				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+					if userContent != "" {
+						memWriter.Append(tokenHash, "user", tryModel, userContent)
+					}
+					if assistantContent != "" {
+						memWriter.Append(tokenHash, "assistant", tryModel, assistantContent)
+					}
+				}
+				return
+			}
+
+			// Buffered response
+			respBody, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				logEntry.StatusCode = http.StatusBadGateway
+				logEntry.Error = "failed to read upstream response"
+				httpError(w, http.StatusBadGateway, logEntry.Error)
+				h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, 0, true)
+				return
+			}
+
+			outputTokens := h.countResponseTokens(respBody, tokenHash)
+			logEntry.StatusCode = resp.StatusCode
+			logEntry.OutputTokens = outputTokens
+			h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, outputTokens)
+
+			isError := resp.StatusCode >= 400
+			h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, outputTokens, isError)
+
+			if !isError {
+				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+					if userContent != "" {
+						memWriter.Append(tokenHash, "user", tryModel, userContent)
+					}
+					assistantContent := extractAssistantContent(respBody)
+					if assistantContent != "" {
+						memWriter.Append(tokenHash, "assistant", tryModel, assistantContent)
+					}
+				}
+			}
+
+			copyHeaders(resp.Header, w.Header())
+			w.WriteHeader(resp.StatusCode)
+			w.Write(respBody)
+			return
 		}
-		userContent = strings.Join(parts, "\n\n")
 	}
 
-	if stream && resp.StatusCode == http.StatusOK {
-		outputTokens, assistantContent := h.handleStreamingResponse(w, resp, tokenHash, model)
-		logEntry.StatusCode = resp.StatusCode
-		logEntry.OutputTokens = outputTokens
-		h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, outputTokens, false)
-
-		// Write conversation to memory
-		if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
-			if userContent != "" {
-				memWriter.Append(tokenHash, "user", model, userContent)
-			}
-			if assistantContent != "" {
-				memWriter.Append(tokenHash, "assistant", model, assistantContent)
-			}
-		}
-		return
-	}
-
-	// Buffered response
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logEntry.StatusCode = http.StatusBadGateway
-		logEntry.Error = "failed to read upstream response"
-		httpError(w, http.StatusBadGateway, logEntry.Error)
+	// All retries/fallbacks exhausted
+	logEntry.RetryCount = retryCount
+	if lastResp != nil {
+		logEntry.StatusCode = lastResp.StatusCode
+		logEntry.Error = fmt.Sprintf("all retries exhausted (last status %d)", lastResp.StatusCode)
 		h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, 0, true)
+		copyHeaders(lastResp.Header, w.Header())
+		w.WriteHeader(lastResp.StatusCode)
+		w.Write(lastBody)
 		return
 	}
+	logEntry.StatusCode = http.StatusBadGateway
+	logEntry.Error = fmt.Sprintf("upstream request failed after %d attempts: %v", retryCount, lastErr)
+	httpError(w, http.StatusBadGateway, logEntry.Error)
+	h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, 0, true)
+}
 
-	// Count output tokens from response
-	outputTokens := h.countResponseTokens(respBody, tokenHash)
-	logEntry.StatusCode = resp.StatusCode
-	logEntry.OutputTokens = outputTokens
-
-	isError := resp.StatusCode >= 400
-	h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, outputTokens, isError)
-
-	// Write conversation to memory
-	if !isError {
-		if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
-			if userContent != "" {
-				memWriter.Append(tokenHash, "user", model, userContent)
-			}
-			assistantContent := extractAssistantContent(respBody)
-			if assistantContent != "" {
-				memWriter.Append(tokenHash, "assistant", model, assistantContent)
-			}
+// shouldRetry checks if the status code should trigger a retry.
+func shouldRetry(cfg *policy.RetryConfig, statusCode int) bool {
+	if cfg == nil || cfg.MaxRetries == 0 {
+		return false
+	}
+	retryOn := cfg.RetryOn
+	if len(retryOn) == 0 {
+		retryOn = []int{429, 500, 502, 503}
+	}
+	for _, code := range retryOn {
+		if statusCode == code {
+			return true
 		}
 	}
-
-	// Write response
-	copyHeaders(resp.Header, w.Header())
-	w.WriteHeader(resp.StatusCode)
-	w.Write(respBody)
+	return false
 }
 
 func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string) {

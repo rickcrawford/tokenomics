@@ -556,3 +556,226 @@ func TestMemoryConfig_Redis(t *testing.T) {
 		t.Error("expected memory redis to be true")
 	}
 }
+
+func TestRateLimitConfig(t *testing.T) {
+	policyJSON := `{
+		"base_key_env": "K",
+		"rate_limit": {
+			"rules": [
+				{"requests": 60, "window": "1m"},
+				{"tokens": 100000, "window": "1h", "strategy": "fixed"}
+			],
+			"max_parallel": 5
+		}
+	}`
+	p, err := Parse(policyJSON)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	if p.RateLimit == nil {
+		t.Fatal("expected rate_limit to be set")
+	}
+	if len(p.RateLimit.Rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(p.RateLimit.Rules))
+	}
+	if p.RateLimit.Rules[0].Requests != 60 {
+		t.Errorf("rule 0 requests = %d, want 60", p.RateLimit.Rules[0].Requests)
+	}
+	if p.RateLimit.Rules[0].Window != "1m" {
+		t.Errorf("rule 0 window = %q, want %q", p.RateLimit.Rules[0].Window, "1m")
+	}
+	if p.RateLimit.Rules[1].Tokens != 100000 {
+		t.Errorf("rule 1 tokens = %d, want 100000", p.RateLimit.Rules[1].Tokens)
+	}
+	if p.RateLimit.Rules[1].Strategy != "fixed" {
+		t.Errorf("rule 1 strategy = %q, want %q", p.RateLimit.Rules[1].Strategy, "fixed")
+	}
+	if p.RateLimit.MaxParallel != 5 {
+		t.Errorf("max_parallel = %d, want 5", p.RateLimit.MaxParallel)
+	}
+
+	// Verify propagation through resolve
+	resolved := p.ResolveForModel("any")
+	if resolved.RateLimit == nil {
+		t.Fatal("expected resolved rate_limit to be set")
+	}
+	if resolved.RateLimit.MaxParallel != 5 {
+		t.Errorf("resolved max_parallel = %d, want 5", resolved.RateLimit.MaxParallel)
+	}
+}
+
+func TestRetryConfig(t *testing.T) {
+	policyJSON := `{
+		"base_key_env": "K",
+		"retry": {
+			"max_retries": 3,
+			"fallbacks": ["gpt-4o-mini", "gpt-3.5-turbo"],
+			"retry_on": [429, 500, 502, 503]
+		}
+	}`
+	p, err := Parse(policyJSON)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	if p.Retry == nil {
+		t.Fatal("expected retry to be set")
+	}
+	if p.Retry.MaxRetries != 3 {
+		t.Errorf("max_retries = %d, want 3", p.Retry.MaxRetries)
+	}
+	if len(p.Retry.Fallbacks) != 2 {
+		t.Fatalf("expected 2 fallbacks, got %d", len(p.Retry.Fallbacks))
+	}
+	if p.Retry.Fallbacks[0] != "gpt-4o-mini" {
+		t.Errorf("fallback 0 = %q, want %q", p.Retry.Fallbacks[0], "gpt-4o-mini")
+	}
+	if len(p.Retry.RetryOn) != 4 {
+		t.Fatalf("expected 4 retry_on codes, got %d", len(p.Retry.RetryOn))
+	}
+
+	resolved := p.ResolveForModel("any")
+	if resolved.Retry == nil {
+		t.Fatal("expected resolved retry to be set")
+	}
+	if resolved.Retry.MaxRetries != 3 {
+		t.Errorf("resolved max_retries = %d, want 3", resolved.Retry.MaxRetries)
+	}
+}
+
+func TestTimeoutConfig(t *testing.T) {
+	policyJSON := `{
+		"base_key_env": "K",
+		"timeout": 60
+	}`
+	p, err := Parse(policyJSON)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	if p.Timeout != 60 {
+		t.Errorf("timeout = %d, want 60", p.Timeout)
+	}
+
+	resolved := p.ResolveForModel("any")
+	if resolved.Timeout != 60 {
+		t.Errorf("resolved timeout = %d, want 60", resolved.Timeout)
+	}
+}
+
+func TestTimeoutConfig_ProviderOverride(t *testing.T) {
+	policyJSON := `{
+		"base_key_env": "K",
+		"timeout": 30,
+		"providers": {
+			"openai": [{
+				"base_key_env": "OK",
+				"model": "gpt-4",
+				"timeout": 120
+			}]
+		}
+	}`
+	p, err := Parse(policyJSON)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	// Global timeout
+	resolved := p.ResolveForModel("other-model")
+	if resolved.Timeout != 30 {
+		t.Errorf("global resolved timeout = %d, want 30", resolved.Timeout)
+	}
+
+	// Provider overrides
+	resolved = p.ResolveForModel("gpt-4")
+	if resolved.Timeout != 120 {
+		t.Errorf("provider resolved timeout = %d, want 120", resolved.Timeout)
+	}
+}
+
+func TestMetadataConfig(t *testing.T) {
+	policyJSON := `{
+		"base_key_env": "K",
+		"metadata": {
+			"team": "engineering",
+			"project": "chatbot",
+			"env": "production"
+		}
+	}`
+	p, err := Parse(policyJSON)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	if len(p.Metadata) != 3 {
+		t.Fatalf("expected 3 metadata entries, got %d", len(p.Metadata))
+	}
+	if p.Metadata["team"] != "engineering" {
+		t.Errorf("metadata team = %q, want %q", p.Metadata["team"], "engineering")
+	}
+
+	resolved := p.ResolveForModel("any")
+	if len(resolved.Metadata) != 3 {
+		t.Fatalf("expected 3 resolved metadata entries, got %d", len(resolved.Metadata))
+	}
+	if resolved.Metadata["project"] != "chatbot" {
+		t.Errorf("resolved metadata project = %q, want %q", resolved.Metadata["project"], "chatbot")
+	}
+}
+
+func TestFullPolicyWithAllFeatures(t *testing.T) {
+	policyJSON := `{
+		"base_key_env": "OPENAI_KEY",
+		"max_tokens": 100000,
+		"timeout": 30,
+		"rate_limit": {
+			"rules": [{"requests": 60, "window": "1m"}],
+			"max_parallel": 5
+		},
+		"retry": {
+			"max_retries": 2,
+			"fallbacks": ["gpt-4o-mini"]
+		},
+		"metadata": {"team": "ai"},
+		"memory": {"enabled": true, "file_path": "/tmp/mem.md"},
+		"prompts": [{"role": "system", "content": "Be helpful."}],
+		"rules": ["(?i)blocked"],
+		"providers": {
+			"openai": [{
+				"base_key_env": "OPENAI_KEY",
+				"model": "gpt-4",
+				"timeout": 120,
+				"max_tokens": 50000
+			}]
+		}
+	}`
+	p, err := Parse(policyJSON)
+	if err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	resolved := p.ResolveForModel("gpt-4")
+
+	if resolved.BaseKeyEnv != "OPENAI_KEY" {
+		t.Errorf("BaseKeyEnv = %q", resolved.BaseKeyEnv)
+	}
+	if resolved.MaxTokens != 50000 {
+		t.Errorf("MaxTokens = %d, want 50000", resolved.MaxTokens)
+	}
+	if resolved.Timeout != 120 {
+		t.Errorf("Timeout = %d, want 120", resolved.Timeout)
+	}
+	if resolved.RateLimit == nil || resolved.RateLimit.MaxParallel != 5 {
+		t.Error("expected rate limit with max_parallel 5")
+	}
+	if resolved.Retry == nil || resolved.Retry.MaxRetries != 2 {
+		t.Error("expected retry with max_retries 2")
+	}
+	if resolved.Metadata["team"] != "ai" {
+		t.Error("expected metadata team=ai")
+	}
+	if !resolved.Memory.Enabled {
+		t.Error("expected memory enabled")
+	}
+}

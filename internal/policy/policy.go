@@ -18,6 +18,28 @@ type MemoryConfig struct {
 	Redis    bool   `json:"redis,omitempty"`     // Push to Redis collection by session
 }
 
+// RateLimitConfig controls request and token throughput.
+// Supports multiple rules with different windows and strategies.
+type RateLimitConfig struct {
+	Rules       []RateLimitRule `json:"rules,omitempty"`
+	MaxParallel int             `json:"max_parallel,omitempty"` // Max concurrent requests
+}
+
+// RateLimitRule defines a single rate limit window.
+type RateLimitRule struct {
+	Requests int    `json:"requests,omitempty"` // Max requests per window (0 = unlimited)
+	Tokens   int    `json:"tokens,omitempty"`   // Max tokens per window (0 = unlimited)
+	Window   string `json:"window,omitempty"`   // Duration: "1s", "1m" (default), "1h", "24h"
+	Strategy string `json:"strategy,omitempty"` // "sliding" (default) or "fixed"
+}
+
+// RetryConfig controls retry and fallback behavior on upstream errors.
+type RetryConfig struct {
+	MaxRetries int      `json:"max_retries,omitempty"` // Max retry attempts (default 0)
+	Fallbacks  []string `json:"fallbacks,omitempty"`   // Fallback model names to try in order
+	RetryOn    []int    `json:"retry_on,omitempty"`    // HTTP status codes that trigger retry (default: 429,500,502,503)
+}
+
 // ProviderPolicy holds a single model-scoped policy within a provider.
 // Each provider can have multiple policies, each targeting different models.
 type ProviderPolicy struct {
@@ -28,6 +50,7 @@ type ProviderPolicy struct {
 	ModelRegex  string    `json:"model_regex,omitempty"`
 	Prompts     []Message `json:"prompts,omitempty"`
 	Rules       []string  `json:"rules,omitempty"`
+	Timeout     int       `json:"timeout,omitempty"` // Per-request timeout in seconds
 
 	// Compiled regexes (not serialized)
 	compiledModelRegex *regexp.Regexp
@@ -55,6 +78,18 @@ type Policy struct {
 
 	// Session memory configuration
 	Memory MemoryConfig `json:"memory,omitempty"`
+
+	// Rate limiting
+	RateLimit *RateLimitConfig `json:"rate_limit,omitempty"`
+
+	// Retry and fallback
+	Retry *RetryConfig `json:"retry,omitempty"`
+
+	// Per-request timeout in seconds (0 = use default)
+	Timeout int `json:"timeout,omitempty"`
+
+	// Metadata tags for analytics and cost attribution
+	Metadata map[string]string `json:"metadata,omitempty"`
 
 	// Compiled regexes for the global policy (not serialized)
 	compiledModelRegex *regexp.Regexp
@@ -152,18 +187,7 @@ func (pp *ProviderPolicy) matchesModel(model string) bool {
 // It searches all providers for a model match.
 func (p *Policy) ResolveForModel(model string) *ResolvedPolicy {
 	// Start with global
-	resolved := &ResolvedPolicy{
-		BaseKeyEnv:         p.BaseKeyEnv,
-		UpstreamURL:        p.UpstreamURL,
-		MaxTokens:          p.MaxTokens,
-		Model:              p.Model,
-		ModelRegex:         p.ModelRegex,
-		Prompts:            p.Prompts,
-		Rules:              p.Rules,
-		Memory:             p.Memory,
-		compiledModelRegex: p.compiledModelRegex,
-		compiledRules:      p.compiledRules,
-	}
+	resolved := p.baseResolved()
 
 	// Search providers for a matching policy
 	for _, policies := range p.Providers {
@@ -180,18 +204,7 @@ func (p *Policy) ResolveForModel(model string) *ResolvedPolicy {
 // ResolveProvider returns the effective policy for a named provider.
 // If model is empty, returns the first policy for that provider (or global if not found).
 func (p *Policy) ResolveProvider(providerName string) *ResolvedPolicy {
-	resolved := &ResolvedPolicy{
-		BaseKeyEnv:         p.BaseKeyEnv,
-		UpstreamURL:        p.UpstreamURL,
-		MaxTokens:          p.MaxTokens,
-		Model:              p.Model,
-		ModelRegex:         p.ModelRegex,
-		Prompts:            p.Prompts,
-		Rules:              p.Rules,
-		Memory:             p.Memory,
-		compiledModelRegex: p.compiledModelRegex,
-		compiledRules:      p.compiledRules,
-	}
+	resolved := p.baseResolved()
 
 	if providerName == "" {
 		return resolved
@@ -203,6 +216,26 @@ func (p *Policy) ResolveProvider(providerName string) *ResolvedPolicy {
 	}
 
 	return mergeProvider(resolved, policies[0], p.compiledRules)
+}
+
+// baseResolved creates a ResolvedPolicy from the global fields.
+func (p *Policy) baseResolved() *ResolvedPolicy {
+	return &ResolvedPolicy{
+		BaseKeyEnv:         p.BaseKeyEnv,
+		UpstreamURL:        p.UpstreamURL,
+		MaxTokens:          p.MaxTokens,
+		Model:              p.Model,
+		ModelRegex:         p.ModelRegex,
+		Prompts:            p.Prompts,
+		Rules:              p.Rules,
+		Memory:             p.Memory,
+		RateLimit:          p.RateLimit,
+		Retry:              p.Retry,
+		Timeout:            p.Timeout,
+		Metadata:           p.Metadata,
+		compiledModelRegex: p.compiledModelRegex,
+		compiledRules:      p.compiledRules,
+	}
 }
 
 func mergeProvider(resolved *ResolvedPolicy, pp *ProviderPolicy, globalRules []*regexp.Regexp) *ResolvedPolicy {
@@ -222,6 +255,11 @@ func mergeProvider(resolved *ResolvedPolicy, pp *ProviderPolicy, globalRules []*
 	if pp.ModelRegex != "" {
 		resolved.ModelRegex = pp.ModelRegex
 		resolved.compiledModelRegex = pp.compiledModelRegex
+	}
+
+	// Provider timeout overrides global
+	if pp.Timeout > 0 {
+		resolved.Timeout = pp.Timeout
 	}
 
 	// Provider prompts prepend before global prompts
@@ -277,6 +315,10 @@ type ResolvedPolicy struct {
 	Prompts     []Message
 	Rules       []string
 	Memory      MemoryConfig
+	RateLimit   *RateLimitConfig
+	Retry       *RetryConfig
+	Timeout     int
+	Metadata    map[string]string
 
 	compiledModelRegex *regexp.Regexp
 	compiledRules      []*regexp.Regexp
