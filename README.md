@@ -49,6 +49,23 @@ eval $(./bin/tokenomics init --token tkn_<your-token> --port 8443 --insecure)
 
 Your agent now routes all API calls through Tokenomics. Run it as usual.
 
+## Multi-Provider Support
+
+Tokenomics supports 16+ AI providers out of the box via `providers.yaml`. A single wrapper token can route to multiple providers based on the requested model:
+
+```json
+{
+  "providers": {
+    "openai": [{ "base_key_env": "OPENAI_API_KEY", "model_regex": "^gpt" }],
+    "anthropic": [{ "base_key_env": "ANTHROPIC_API_KEY", "model_regex": "^claude" }]
+  }
+}
+```
+
+The proxy automatically handles provider-specific authentication (Bearer, header-based, query string), custom headers, and chat endpoint paths. See [Policies](docs/POLICIES.md) for details.
+
+**Supported providers:** OpenAI, Anthropic, Azure OpenAI, Google Gemini, Vertex AI, Mistral, Cohere, Groq, Together AI, Fireworks AI, Perplexity, DeepSeek, xAI (Grok), OpenRouter, Ollama, vLLM, LiteLLM.
+
 ## Documentation
 
 | Topic | Description |
@@ -60,6 +77,10 @@ Your agent now routes all API calls through Tokenomics. Run it as usual.
 | [TLS](docs/TLS.md) | Auto-generated certificates, CA trust, custom certs |
 | [Stats & Logging](docs/STATS_AND_LOGGING.md) | Request logging, /stats endpoint, usage tracking |
 
+## Author
+
+**Rick Crawford** - [LinkedIn](https://www.linkedin.com/in/rickcrawford/) | [GitHub](https://github.com/rickcrawford)
+
 ## License
 
-MIT
+[MIT](LICENSE)

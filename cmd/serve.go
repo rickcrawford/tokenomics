@@ -66,8 +66,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Get hash key
 	hashKey := getHashKey(cfg.Security.HashKeyEnv)
 
-	// Create proxy handler
-	handler := proxy.NewHandler(tokenStore, sessStore, hashKey, cfg.Server.UpstreamURL)
+	// Create proxy handler with provider configs
+	handler := proxy.NewHandler(tokenStore, sessStore, hashKey, cfg.Server.UpstreamURL, cfg.Providers)
 
 	// Wire up Redis memory writer if Redis session backend is configured
 	if rs, ok := sessStore.(*session.RedisStore); ok {

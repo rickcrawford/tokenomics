@@ -172,6 +172,66 @@ A provider policy matches when:
 - `model_regex` is set and the requested model matches the pattern, OR
 - Neither `model` nor `model_regex` is set (catches all models)
 
+### Provider Configuration File
+
+Provider connection details (upstream URLs, authentication, headers) are defined in a separate `providers.yaml` file. Policies reference providers by name — the proxy automatically resolves auth scheme, custom headers, and chat path from the provider config.
+
+```yaml
+# providers.yaml
+providers:
+  openai:
+    upstream_url: https://api.openai.com
+    api_key_env: OPENAI_API_KEY
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+
+  anthropic:
+    upstream_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+    auth_scheme: header
+    auth_header: x-api-key
+    headers:
+      anthropic-version: "2023-06-01"
+    chat_path: /v1/messages
+    models:
+      - claude-3-opus
+```
+
+When a policy references `"anthropic"` as a provider name, the proxy:
+1. Routes to `https://api.anthropic.com`
+2. Sends the API key via `x-api-key` header (not `Authorization: Bearer`)
+3. Adds the `anthropic-version` header to every request
+4. Uses `/v1/messages` instead of `/v1/chat/completions`
+
+#### Provider Config Fields
+
+| Field | Description |
+|-------|-------------|
+| `upstream_url` | Base URL for the provider's API |
+| `api_key_env` | Environment variable holding the API key |
+| `auth_scheme` | How to send the key: `"bearer"` (default), `"header"` (raw), `"query"` (?key=) |
+| `auth_header` | Custom header name (default: `"Authorization"`) |
+| `headers` | Extra headers sent with every request |
+| `models` | Known model prefixes (informational) |
+| `chat_path` | Override path for chat completions endpoint |
+
+#### Auth Schemes
+
+- **`bearer`** (default): Sends `Authorization: Bearer <key>`
+- **`header`**: Sends `<auth_header>: <key>` (e.g., `x-api-key: sk-ant-...`)
+- **`query`**: Appends `?key=<key>` to the URL (e.g., Google Gemini)
+
+#### Resolution Priority
+
+Connection details are resolved in this order (first wins):
+
+1. **Policy** — `upstream_url` or `base_key_env` set directly in the policy/provider policy
+2. **Provider config** — `upstream_url` or `api_key_env` from `providers.yaml`
+3. **Global config** — `server.upstream_url` from `config.yaml`
+
+The `providers.yaml` ships with 16 pre-configured providers including OpenAI, Anthropic, Azure OpenAI, Google Gemini, Vertex AI, Mistral, Cohere, Groq, Together, Fireworks, Perplexity, DeepSeek, xAI, OpenRouter, Ollama, vLLM, and LiteLLM.
+
 ## Rate Limiting
 
 The `rate_limit` field controls request and token throughput per wrapper token. Supports multiple rules with different time windows and strategies.

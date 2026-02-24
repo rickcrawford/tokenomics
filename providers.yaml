@@ -1,0 +1,222 @@
+# Tokenomics Provider Configuration
+#
+# Defines known upstream AI providers. Policies reference these by name
+# in their "providers" map, inheriting connection details automatically.
+#
+# Each provider specifies:
+#   upstream_url  - Base URL for the provider's API
+#   api_key_env   - Environment variable holding the API key
+#   auth_scheme   - How to send the key: "bearer" (default), "header", "query"
+#   auth_header   - Custom header name (default: "Authorization")
+#   headers       - Extra headers sent with every request
+#   models        - Known model prefixes (informational, for documentation)
+#   chat_path     - Override path for chat completions endpoint
+
+providers:
+
+  # ── OpenAI ─────────────────────────────────────────────────────────────
+  openai:
+    upstream_url: https://api.openai.com
+    api_key_env: OPENAI_API_KEY
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+      - gpt-4-turbo
+      - gpt-4
+      - gpt-3.5-turbo
+      - o1
+      - o1-mini
+      - o1-pro
+      - o3
+      - o3-mini
+      - o4-mini
+
+  # ── Anthropic ──────────────────────────────────────────────────────────
+  anthropic:
+    upstream_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+    auth_scheme: header
+    auth_header: x-api-key
+    headers:
+      anthropic-version: "2023-06-01"
+    chat_path: /v1/messages
+    models:
+      - claude-opus-4-6
+      - claude-sonnet-4-6
+      - claude-haiku-4-5
+      - claude-3.5-sonnet
+      - claude-3.5-haiku
+      - claude-3-opus
+      - claude-3-sonnet
+      - claude-3-haiku
+
+  # ── Azure OpenAI ───────────────────────────────────────────────────────
+  # NOTE: Replace {resource} and {deployment} with your Azure values.
+  # upstream_url format: https://{resource}.openai.azure.com/openai/deployments/{deployment}
+  azure_openai:
+    upstream_url: https://{resource}.openai.azure.com
+    api_key_env: AZURE_OPENAI_API_KEY
+    auth_scheme: header
+    auth_header: api-key
+    headers:
+      api-version: "2024-10-21"
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+      - gpt-4
+      - gpt-35-turbo
+      - o1
+      - o1-mini
+
+  # ── Google Gemini (AI Studio) ──────────────────────────────────────────
+  google_gemini:
+    upstream_url: https://generativelanguage.googleapis.com
+    api_key_env: GOOGLE_API_KEY
+    auth_scheme: query
+    chat_path: /v1beta/models/{model}:generateContent
+    models:
+      - gemini-2.5-pro
+      - gemini-2.5-flash
+      - gemini-2.0-flash
+      - gemini-2.0-flash-lite
+      - gemini-1.5-pro
+      - gemini-1.5-flash
+
+  # ── Google Vertex AI ───────────────────────────────────────────────────
+  # NOTE: Replace {project} and {location} with your GCP values.
+  # Uses OAuth2 bearer token from gcloud auth.
+  vertex_ai:
+    upstream_url: https://{location}-aiplatform.googleapis.com
+    api_key_env: VERTEX_AI_TOKEN
+    chat_path: /v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent
+    models:
+      - gemini-2.5-pro
+      - gemini-2.5-flash
+      - gemini-2.0-flash
+
+  # ── Mistral AI ─────────────────────────────────────────────────────────
+  mistral:
+    upstream_url: https://api.mistral.ai
+    api_key_env: MISTRAL_API_KEY
+    models:
+      - mistral-large-latest
+      - mistral-medium-latest
+      - mistral-small-latest
+      - open-mistral-nemo
+      - open-mixtral-8x22b
+      - codestral-latest
+      - pixtral-large-latest
+
+  # ── Cohere ─────────────────────────────────────────────────────────────
+  cohere:
+    upstream_url: https://api.cohere.com
+    api_key_env: COHERE_API_KEY
+    chat_path: /v2/chat
+    models:
+      - command-r-plus
+      - command-r
+      - command-light
+      - command-nightly
+
+  # ── Groq ───────────────────────────────────────────────────────────────
+  groq:
+    upstream_url: https://api.groq.com/openai
+    api_key_env: GROQ_API_KEY
+    models:
+      - llama-3.3-70b-versatile
+      - llama-3.1-8b-instant
+      - llama-3.1-70b-versatile
+      - mixtral-8x7b-32768
+      - gemma2-9b-it
+
+  # ── Together AI ────────────────────────────────────────────────────────
+  together:
+    upstream_url: https://api.together.xyz
+    api_key_env: TOGETHER_API_KEY
+    models:
+      - meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo
+      - meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
+      - meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
+      - mistralai/Mixtral-8x22B-Instruct-v0.1
+      - Qwen/Qwen2.5-72B-Instruct-Turbo
+
+  # ── Fireworks AI ───────────────────────────────────────────────────────
+  fireworks:
+    upstream_url: https://api.fireworks.ai/inference
+    api_key_env: FIREWORKS_API_KEY
+    models:
+      - accounts/fireworks/models/llama-v3p1-405b-instruct
+      - accounts/fireworks/models/llama-v3p1-70b-instruct
+      - accounts/fireworks/models/mixtral-8x22b-instruct
+      - accounts/fireworks/models/qwen2p5-72b-instruct
+
+  # ── Perplexity ─────────────────────────────────────────────────────────
+  perplexity:
+    upstream_url: https://api.perplexity.ai
+    api_key_env: PERPLEXITY_API_KEY
+    models:
+      - sonar-pro
+      - sonar
+      - sonar-reasoning-pro
+      - sonar-reasoning
+
+  # ── DeepSeek ───────────────────────────────────────────────────────────
+  deepseek:
+    upstream_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    models:
+      - deepseek-chat
+      - deepseek-reasoner
+
+  # ── xAI (Grok) ────────────────────────────────────────────────────────
+  xai:
+    upstream_url: https://api.x.ai
+    api_key_env: XAI_API_KEY
+    models:
+      - grok-2
+      - grok-2-mini
+      - grok-3
+      - grok-3-mini
+
+  # ── OpenRouter ─────────────────────────────────────────────────────────
+  # Routes to multiple providers behind a single API. Models use
+  # provider/model format (e.g., "openai/gpt-4o", "anthropic/claude-3-opus").
+  openrouter:
+    upstream_url: https://openrouter.ai/api
+    api_key_env: OPENROUTER_API_KEY
+    models:
+      - openai/gpt-4o
+      - anthropic/claude-3-opus
+      - meta-llama/llama-3.1-405b-instruct
+      - google/gemini-pro-1.5
+
+  # ── Ollama (local) ─────────────────────────────────────────────────────
+  # No API key needed for local inference.
+  ollama:
+    upstream_url: http://localhost:11434
+    api_key_env: ""
+    auth_scheme: header
+    auth_header: ""
+    chat_path: /api/chat
+    models:
+      - llama3.1
+      - llama3.2
+      - mistral
+      - codellama
+      - phi3
+      - gemma2
+      - qwen2.5
+
+  # ── vLLM (self-hosted) ─────────────────────────────────────────────────
+  # OpenAI-compatible API served by vLLM.
+  vllm:
+    upstream_url: http://localhost:8000
+    api_key_env: VLLM_API_KEY
+    models: []
+
+  # ── LiteLLM Proxy ──────────────────────────────────────────────────────
+  # If running LiteLLM as a unified gateway.
+  litellm:
+    upstream_url: http://localhost:4000
+    api_key_env: LITELLM_API_KEY
+    models: []

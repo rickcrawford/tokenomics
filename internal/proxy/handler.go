@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rickcrawford/tokenomics/internal/config"
 	"github.com/rickcrawford/tokenomics/internal/policy"
 	"github.com/rickcrawford/tokenomics/internal/session"
 	"github.com/rickcrawford/tokenomics/internal/store"
@@ -40,13 +41,17 @@ type Handler struct {
 	rateLimiter *RateLimiter
 	hashKey     []byte
 	upstreamURL string
+	providers   map[string]config.ProviderConfig
 
 	memWriterMu    sync.Mutex
 	memWriters     map[string]session.MemoryWriter
 	redisMemWriter session.MemoryWriter
 }
 
-func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstreamURL string) *Handler {
+func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstreamURL string, providers map[string]config.ProviderConfig) *Handler {
+	if providers == nil {
+		providers = make(map[string]config.ProviderConfig)
+	}
 	return &Handler{
 		store:       s,
 		sessions:    sess,
@@ -54,6 +59,7 @@ func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstream
 		rateLimiter: NewRateLimiter(),
 		hashKey:     hashKey,
 		upstreamURL: upstreamURL,
+		providers:   providers,
 		memWriters:  make(map[string]session.MemoryWriter),
 	}
 }
@@ -210,10 +216,26 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		logEntry.Metadata = resolved.Metadata
 	}
 
-	// Override upstream with resolved policy if set
+	// Resolve provider config for auth, headers, and chat path
+	var providerCfg *config.ProviderConfig
+	if resolved.ProviderName != "" {
+		if pc, ok := h.providers[resolved.ProviderName]; ok {
+			providerCfg = &pc
+		}
+	}
+
+	// Override upstream: policy > provider config > global
 	if resolved.UpstreamURL != "" {
 		upstream = resolved.UpstreamURL
+	} else if providerCfg != nil && providerCfg.UpstreamURL != "" {
+		upstream = providerCfg.UpstreamURL
 	}
+
+	// Use provider's api_key_env if the resolved policy doesn't specify one
+	if resolved.BaseKeyEnv == "" && providerCfg != nil && providerCfg.APIKeyEnv != "" {
+		resolved.BaseKeyEnv = providerCfg.APIKeyEnv
+	}
+
 	logEntry.BaseKeyEnv = resolved.BaseKeyEnv
 	logEntry.UpstreamURL = upstream
 
@@ -356,8 +378,25 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				httpError(w, http.StatusInternalServerError, logEntry.Error)
 				return
 			}
-			upstreamURL.Path = r.URL.Path
+
+			// Use provider chat path if configured, otherwise use the original request path
+			if providerCfg != nil && providerCfg.ChatPath != "" {
+				upstreamURL.Path = providerCfg.ChatPath
+			} else {
+				upstreamURL.Path = r.URL.Path
+			}
 			upstreamURL.RawQuery = r.URL.RawQuery
+
+			// Apply query-based auth if needed
+			authScheme := "bearer"
+			if providerCfg != nil && providerCfg.AuthScheme != "" {
+				authScheme = providerCfg.AuthScheme
+			}
+			if authScheme == "query" {
+				q := upstreamURL.Query()
+				q.Set("key", realKey)
+				upstreamURL.RawQuery = q.Encode()
+			}
 
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			proxyReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), bytes.NewReader(newBody))
@@ -370,7 +409,31 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			}
 
 			copyHeaders(r.Header, proxyReq.Header)
-			proxyReq.Header.Set("Authorization", "Bearer "+realKey)
+
+			// Set auth based on provider scheme
+			switch authScheme {
+			case "header":
+				authHeader := "Authorization"
+				if providerCfg != nil && providerCfg.AuthHeader != "" {
+					authHeader = providerCfg.AuthHeader
+				}
+				if authHeader != "" {
+					proxyReq.Header.Set(authHeader, realKey)
+				}
+			case "query":
+				// Already handled above in URL; remove any Authorization header from copy
+				proxyReq.Header.Del("Authorization")
+			default: // "bearer"
+				proxyReq.Header.Set("Authorization", "Bearer "+realKey)
+			}
+
+			// Add provider-specific extra headers
+			if providerCfg != nil {
+				for k, v := range providerCfg.Headers {
+					proxyReq.Header.Set(k, v)
+				}
+			}
+
 			proxyReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
 			proxyReq.Header.Set("X-Client-Request-Id", clientRequestID)
 
@@ -610,6 +673,26 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time) {
 	resolved := pol.ResolveProvider("")
 
+	// Look up provider config
+	var providerCfg *config.ProviderConfig
+	if resolved.ProviderName != "" {
+		if pc, ok := h.providers[resolved.ProviderName]; ok {
+			providerCfg = &pc
+		}
+	}
+
+	// Resolve upstream: policy > provider config > global
+	if resolved.UpstreamURL != "" {
+		upstream = resolved.UpstreamURL
+	} else if providerCfg != nil && providerCfg.UpstreamURL != "" {
+		upstream = providerCfg.UpstreamURL
+	}
+
+	// Use provider's api_key_env if the resolved policy doesn't specify one
+	if resolved.BaseKeyEnv == "" && providerCfg != nil && providerCfg.APIKeyEnv != "" {
+		resolved.BaseKeyEnv = providerCfg.APIKeyEnv
+	}
+
 	logEntry := &RequestLog{
 		Timestamp:   start.UTC().Format(time.RFC3339Nano),
 		Method:      r.Method,
@@ -648,7 +731,37 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 			req.URL.Scheme = upstreamURL.Scheme
 			req.URL.Host = upstreamURL.Host
 			req.Host = upstreamURL.Host
-			req.Header.Set("Authorization", "Bearer "+realKey)
+
+			// Apply auth based on provider scheme
+			authScheme := "bearer"
+			if providerCfg != nil && providerCfg.AuthScheme != "" {
+				authScheme = providerCfg.AuthScheme
+			}
+
+			switch authScheme {
+			case "header":
+				authHeader := "Authorization"
+				if providerCfg != nil && providerCfg.AuthHeader != "" {
+					authHeader = providerCfg.AuthHeader
+				}
+				if authHeader != "" {
+					req.Header.Set(authHeader, realKey)
+				}
+			case "query":
+				q := req.URL.Query()
+				q.Set("key", realKey)
+				req.URL.RawQuery = q.Encode()
+				req.Header.Del("Authorization")
+			default:
+				req.Header.Set("Authorization", "Bearer "+realKey)
+			}
+
+			// Add provider-specific extra headers
+			if providerCfg != nil {
+				for k, v := range providerCfg.Headers {
+					req.Header.Set(k, v)
+				}
+			}
 		},
 	}
 

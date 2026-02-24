@@ -190,9 +190,10 @@ func (p *Policy) ResolveForModel(model string) *ResolvedPolicy {
 	resolved := p.baseResolved()
 
 	// Search providers for a matching policy
-	for _, policies := range p.Providers {
+	for name, policies := range p.Providers {
 		for _, pp := range policies {
 			if pp.matchesModel(model) {
+				resolved.ProviderName = name
 				return mergeProvider(resolved, pp, p.compiledRules)
 			}
 		}
@@ -215,6 +216,7 @@ func (p *Policy) ResolveProvider(providerName string) *ResolvedPolicy {
 		return resolved
 	}
 
+	resolved.ProviderName = providerName
 	return mergeProvider(resolved, policies[0], p.compiledRules)
 }
 
@@ -307,18 +309,19 @@ func (p *Policy) CompiledRules() []*regexp.Regexp {
 // ResolvedPolicy is the effective policy after merging global + provider.
 // This is what the proxy handler works with.
 type ResolvedPolicy struct {
-	BaseKeyEnv  string
-	UpstreamURL string
-	MaxTokens   int64
-	Model       string
-	ModelRegex  string
-	Prompts     []Message
-	Rules       []string
-	Memory      MemoryConfig
-	RateLimit   *RateLimitConfig
-	Retry       *RetryConfig
-	Timeout     int
-	Metadata    map[string]string
+	BaseKeyEnv   string
+	UpstreamURL  string
+	MaxTokens    int64
+	Model        string
+	ModelRegex   string
+	ProviderName string // Which provider was matched (key from Providers map)
+	Prompts      []Message
+	Rules        []string
+	Memory       MemoryConfig
+	RateLimit    *RateLimitConfig
+	Retry        *RetryConfig
+	Timeout      int
+	Metadata     map[string]string
 
 	compiledModelRegex *regexp.Regexp
 	compiledRules      []*regexp.Regexp

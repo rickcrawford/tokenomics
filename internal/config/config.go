@@ -1,16 +1,30 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Storage  StorageConfig  `mapstructure:"storage"`
-	Session  SessionConfig  `mapstructure:"session"`
-	Security SecurityConfig `mapstructure:"security"`
+	Server    ServerConfig              `mapstructure:"server"`
+	Storage   StorageConfig             `mapstructure:"storage"`
+	Session   SessionConfig             `mapstructure:"session"`
+	Security  SecurityConfig            `mapstructure:"security"`
+	Providers map[string]ProviderConfig `mapstructure:"providers"`
+}
+
+// ProviderConfig defines a known upstream AI provider.
+// Policies reference providers by name instead of repeating connection details.
+type ProviderConfig struct {
+	UpstreamURL string            `mapstructure:"upstream_url" json:"upstream_url"`
+	APIKeyEnv   string            `mapstructure:"api_key_env" json:"api_key_env"`
+	AuthHeader  string            `mapstructure:"auth_header" json:"auth_header,omitempty"`   // Custom auth header name (default: "Authorization")
+	AuthScheme  string            `mapstructure:"auth_scheme" json:"auth_scheme,omitempty"`   // "bearer" (default), "header" (raw value in auth_header), "query" (appended as ?key=)
+	Headers     map[string]string `mapstructure:"headers" json:"headers,omitempty"`           // Extra headers sent with every request
+	Models      []string          `mapstructure:"models" json:"models,omitempty"`             // Known model prefixes (informational)
+	ChatPath    string            `mapstructure:"chat_path" json:"chat_path,omitempty"`       // Override chat completions path (default: /v1/chat/completions)
 }
 
 type ServerConfig struct {
@@ -85,5 +99,53 @@ func Load(cfgFile string) (*Config, error) {
 		return nil, err
 	}
 
+	// Load providers from separate providers.yaml if not inline in config
+	if len(cfg.Providers) == 0 {
+		providers, err := LoadProviders("")
+		if err == nil && len(providers) > 0 {
+			cfg.Providers = providers
+		}
+	}
+
 	return &cfg, nil
+}
+
+// LoadProviders loads provider definitions from a providers.yaml file.
+// If providersFile is empty, searches standard paths (., $HOME/.tokenomics).
+func LoadProviders(providersFile string) (map[string]ProviderConfig, error) {
+	pv := viper.New()
+
+	if providersFile != "" {
+		pv.SetConfigFile(providersFile)
+	} else {
+		pv.SetConfigName("providers")
+		pv.SetConfigType("yaml")
+		pv.AddConfigPath(".")
+		pv.AddConfigPath("$HOME/.tokenomics")
+	}
+
+	if err := pv.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var wrapper struct {
+		Providers map[string]ProviderConfig `mapstructure:"providers"`
+	}
+	if err := pv.Unmarshal(&wrapper); err != nil {
+		return nil, fmt.Errorf("parse providers config: %w", err)
+	}
+
+	return wrapper.Providers, nil
+}
+
+// GetProvider returns the provider config by name, if it exists.
+func (c *Config) GetProvider(name string) (ProviderConfig, bool) {
+	if c.Providers == nil {
+		return ProviderConfig{}, false
+	}
+	p, ok := c.Providers[name]
+	return p, ok
 }
