@@ -19,7 +19,9 @@ A policy is a JSON object passed to `token create --policy`:
     { "role": "system", "content": "You are a helpful assistant." }
   ],
   "rules": [
-    "(?i)ignore.*instructions"
+    {"type": "regex", "pattern": "(?i)ignore.*instructions", "action": "fail"},
+    {"type": "pii", "detect": ["ssn", "credit_card"], "action": "mask"},
+    {"type": "keyword", "keywords": ["jailbreak"], "action": "warn"}
   ],
   "providers": {
     "openai": [
@@ -129,11 +131,42 @@ Messages prepended to every chat completion request.
 
 ### `rules` (optional)
 
-Regex patterns that block matching user message content.
+Content inspection rules that can block, warn, log, or mask matching content. Rules are objects with a type, action, and scope.
+
+**Rule types:**
+
+| Type | Description | Required Field |
+|------|-------------|----------------|
+| `regex` | Match a Go regular expression | `pattern` |
+| `keyword` | Match case-insensitive keywords with word boundaries | `keywords` (array) |
+| `pii` | Detect personally identifiable information | `detect` (array of PII types) |
+
+**Actions:**
+
+| Action | Behavior |
+|--------|----------|
+| `fail` | Block the request with 403 Forbidden (default) |
+| `warn` | Allow the request but log a warning |
+| `log` | Silently record the match in structured logs |
+| `mask` | Redact matched content with `[REDACTED]` before forwarding |
+
+**Scope:** `input` (user messages, default), `output` (response content), or `both`.
+
+**Built-in PII types:** `ssn`, `credit_card`, `email`, `phone`, `ip_address`, `aws_key`, `api_key`, `jwt`, `private_key`, `connection_string`, `github_token`.
 
 ```json
-{ "rules": ["(?i)ignore.*instructions"] }
+{
+  "rules": [
+    {"type": "regex", "pattern": "(?i)ignore.*instructions", "action": "fail"},
+    {"type": "pii", "detect": ["ssn", "credit_card", "email"], "action": "mask", "scope": "both"},
+    {"type": "keyword", "keywords": ["jailbreak", "bypass"], "action": "warn", "name": "prompt-injection"}
+  ]
+}
 ```
+
+Rules support an optional `name` field for identifying matches in logs. All rule matches (violations, warnings, and logs) are recorded in structured request logs.
+
+**Backward compatible:** The old string-array format `["regex1", "regex2"]` still works and auto-converts each entry to a regex rule with `fail` action.
 
 ## Providers
 
@@ -466,9 +499,10 @@ When a request comes in for `claude-3-opus`, the proxy matches the Anthropic pro
     { "role": "system", "content": "Answer only questions about our product." }
   ],
   "rules": [
-    "(?i)ignore.*instructions",
-    "(?i)system.*prompt",
-    "(?i)jailbreak"
+    {"type": "regex", "pattern": "(?i)ignore.*instructions", "action": "fail"},
+    {"type": "regex", "pattern": "(?i)system.*prompt", "action": "fail"},
+    {"type": "keyword", "keywords": ["jailbreak"], "action": "fail"},
+    {"type": "pii", "detect": ["ssn", "credit_card", "email"], "action": "mask", "scope": "both"}
   ],
   "memory": {
     "enabled": true,
@@ -534,7 +568,11 @@ If a request to `gpt-4o` fails with a 429 or 5xx, the proxy retries up to 2 time
   "max_tokens": 500000,
   "timeout": 30,
   "prompts": [{ "role": "system", "content": "You are a helpful customer support agent." }],
-  "rules": ["(?i)ignore.*instructions", "(?i)jailbreak"],
+  "rules": [
+    {"type": "regex", "pattern": "(?i)ignore.*instructions", "action": "fail"},
+    {"type": "keyword", "keywords": ["jailbreak"], "action": "fail"},
+    {"type": "pii", "detect": ["ssn", "credit_card"], "action": "mask"}
+  ],
   "rate_limit": {
     "rules": [
       { "requests": 30, "window": "1m" },
