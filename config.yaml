@@ -1,0 +1,23 @@
+server:
+  http_port: 8080
+  https_port: 8443
+  tls:
+    enabled: true
+    cert_file: ""
+    key_file: ""
+    auto_gen: true
+    cert_dir: "./certs"
+  upstream_url: "https://api.openai.com"
+
+storage:
+  db_path: "./tokenomics.db"
+
+session:
+  backend: "memory"
+  redis:
+    addr: "localhost:6379"
+    password: ""
+    db: 0
+
+security:
+  hash_key_env: "TOKENOMICS_HASH_KEY"
