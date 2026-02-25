@@ -13,6 +13,21 @@ type Config struct {
 	Session   SessionConfig             `mapstructure:"session"`
 	Security  SecurityConfig            `mapstructure:"security"`
 	Providers map[string]ProviderConfig `mapstructure:"providers"`
+	Events    EventsConfig              `mapstructure:"events"`
+}
+
+// EventsConfig holds webhook and future event emitter configuration.
+type EventsConfig struct {
+	Webhooks []WebhookEndpoint `mapstructure:"webhooks"`
+}
+
+// WebhookEndpoint configures a single webhook destination.
+type WebhookEndpoint struct {
+	URL        string   `mapstructure:"url"`
+	Secret     string   `mapstructure:"secret"`      // Shared secret sent as X-Webhook-Secret
+	SigningKey  string   `mapstructure:"signing_key"`  // HMAC-SHA256 signing key for X-Webhook-Signature
+	Events     []string `mapstructure:"events"`       // Event type filter (supports trailing * wildcard); empty = all
+	TimeoutSec int      `mapstructure:"timeout"`      // HTTP timeout in seconds (default 10)
 }
 
 // ProviderConfig defines a known upstream AI provider.

@@ -162,6 +162,7 @@ Backward compatible -- old `["regex_string"]` format still works and auto-conver
 | [Agent Integration](docs/AGENT_INTEGRATION.md) | Connecting OpenAI, Anthropic, Azure, Gemini, and custom agents |
 | [TLS](docs/TLS.md) | Auto-generated certificates, CA trust, custom certs |
 | [Stats & Logging](docs/STATS_AND_LOGGING.md) | Request logging, /stats endpoint, usage tracking |
+| [Events & Webhooks](docs/EVENTS.md) | Webhook events for token CRUD, rule violations, budget alerts |
 
 ## Author
 

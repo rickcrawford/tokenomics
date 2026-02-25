@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
+	"github.com/rickcrawford/tokenomics/internal/events"
 	"github.com/rickcrawford/tokenomics/internal/policy"
 	"github.com/rickcrawford/tokenomics/internal/session"
 	"github.com/rickcrawford/tokenomics/internal/store"
@@ -39,6 +40,7 @@ type Handler struct {
 	sessions    session.Store
 	stats       *UsageStats
 	rateLimiter *RateLimiter
+	emitter     events.Emitter
 	hashKey     []byte
 	upstreamURL string
 	providers   map[string]config.ProviderConfig
@@ -48,15 +50,19 @@ type Handler struct {
 	redisMemWriter session.MemoryWriter
 }
 
-func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstreamURL string, providers map[string]config.ProviderConfig) *Handler {
+func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstreamURL string, providers map[string]config.ProviderConfig, emitter events.Emitter) *Handler {
 	if providers == nil {
 		providers = make(map[string]config.ProviderConfig)
+	}
+	if emitter == nil {
+		emitter = events.Nop{}
 	}
 	return &Handler{
 		store:       s,
 		sessions:    sess,
 		stats:       NewUsageStats(),
 		rateLimiter: NewRateLimiter(),
+		emitter:     emitter,
 		hashKey:     hashKey,
 		upstreamURL: upstreamURL,
 		providers:   providers,
@@ -241,6 +247,9 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 	// Rate limit check
 	if err := h.rateLimiter.Allow(tokenHash, resolved.RateLimit); err != nil {
+		h.emitter.Emit(r.Context(), events.New(events.RateExceeded, map[string]interface{}{
+			"token_hash": tokenHash[:16], "model": model, "error": err.Error(),
+		}))
 		logEntry.StatusCode = http.StatusTooManyRequests
 		logEntry.Error = err.Error()
 		httpError(w, http.StatusTooManyRequests, err.Error())
@@ -283,6 +292,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 					Action:  match.Action,
 					Message: match.Message,
 				})
+				h.emitter.Emit(r.Context(), events.New(events.RuleViolation, map[string]interface{}{
+					"token_hash": tokenHash[:16], "model": model,
+					"rule_name": match.Name, "message": match.Message,
+				}))
 			}
 			log.Printf("[rule:fail] policy violation: %s (token=%s model=%s)", err.Error(), tokenHash[:16], model)
 			logEntry.StatusCode = http.StatusForbidden
@@ -299,6 +312,14 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				Action:  match.Action,
 				Message: match.Message,
 			})
+			evtType := events.RuleMatch
+			if match.Action == "warn" {
+				evtType = events.RuleWarning
+			}
+			h.emitter.Emit(r.Context(), events.New(evtType, map[string]interface{}{
+				"token_hash": tokenHash[:16], "model": model,
+				"rule_name": match.Name, "action": match.Action, "message": match.Message,
+			}))
 			log.Printf("[rule:%s] %s (token=%s model=%s)", match.Action, match.Message, tokenHash[:16], model)
 		}
 
@@ -311,6 +332,9 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				Action:  "mask",
 				Message: "content redacted before forwarding",
 			})
+			h.emitter.Emit(r.Context(), events.New(events.RuleMask, map[string]interface{}{
+				"token_hash": tokenHash[:16], "model": model,
+			}))
 			log.Printf("[rule:mask] content redacted (token=%s model=%s)", tokenHash[:16], model)
 		}
 	}
@@ -337,6 +361,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	if resolved.MaxTokens > 0 {
 		usage, _ := h.sessions.GetUsage(tokenHash)
 		if usage+int64(inputTokens) > resolved.MaxTokens {
+			h.emitter.Emit(r.Context(), events.New(events.BudgetExceeded, map[string]interface{}{
+				"token_hash": tokenHash[:16], "model": model,
+				"used": usage, "input": inputTokens, "limit": resolved.MaxTokens,
+			}))
 			logEntry.StatusCode = http.StatusTooManyRequests
 			logEntry.Error = fmt.Sprintf("budget exceeded: used %d + input %d > limit %d", usage, inputTokens, resolved.MaxTokens)
 			httpError(w, http.StatusTooManyRequests, logEntry.Error)
@@ -502,6 +530,9 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			logEntry.UpstreamRequestID = extractUpstreamRequestID(resp.Header)
 
 			h.sessions.AddUsage(tokenHash, int64(inputTokens))
+			h.emitter.Emit(r.Context(), events.New(events.BudgetUpdate, map[string]interface{}{
+				"token_hash": tokenHash[:16], "model": tryModel, "input_tokens": inputTokens,
+			}))
 
 			// Record token usage for rate limiter
 			h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, inputTokens)
@@ -532,6 +563,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				logEntry.UpstreamID = streamUpstreamID
 				h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, outputTokens, false)
 				h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, outputTokens)
+				h.emitter.Emit(r.Context(), events.New(events.RequestCompleted, map[string]interface{}{
+					"token_hash": tokenHash[:16], "model": tryModel, "stream": true,
+					"status_code": resp.StatusCode, "input_tokens": inputTokens, "output_tokens": outputTokens,
+				}))
 
 				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
 					if userContent != "" {
@@ -563,6 +598,11 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 			isError := resp.StatusCode >= 400
 			h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, outputTokens, isError)
+			h.emitter.Emit(r.Context(), events.New(events.RequestCompleted, map[string]interface{}{
+				"token_hash": tokenHash[:16], "model": tryModel, "stream": false,
+				"status_code": resp.StatusCode, "input_tokens": inputTokens, "output_tokens": outputTokens,
+				"error": isError,
+			}))
 
 			if !isError {
 				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {

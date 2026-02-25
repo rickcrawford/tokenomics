@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rickcrawford/tokenomics/internal/events"
 	"github.com/rickcrawford/tokenomics/internal/policy"
 
 	bolt "go.etcd.io/bbolt"
@@ -19,11 +21,23 @@ type BoltStore struct {
 	dbPath        string
 	db            *bolt.DB
 	encryptionKey []byte // nil = no encryption
+	emitter       events.Emitter
 
 	mu    sync.RWMutex
 	cache map[string]*cacheEntry
 
 	stopWatch chan struct{}
+}
+
+// SetEmitter configures the event emitter for token lifecycle events.
+func (s *BoltStore) SetEmitter(e events.Emitter) {
+	s.emitter = e
+}
+
+func (s *BoltStore) emit(eventType string, data map[string]interface{}) {
+	if s.emitter != nil {
+		s.emitter.Emit(context.Background(), events.New(eventType, data))
+	}
 }
 
 // cacheEntry holds a parsed policy and its expiration for fast lookup.
@@ -141,6 +155,10 @@ func (s *BoltStore) Create(tokenHash string, policyJSON string, expiresAt string
 		return fmt.Errorf("create token: %w", err)
 	}
 
+	s.emit(events.TokenCreated, map[string]interface{}{
+		"token_hash": keyPrefix([]byte(tokenHash)), "expires_at": expiresAt,
+	})
+
 	return s.Reload()
 }
 
@@ -240,6 +258,10 @@ func (s *BoltStore) Update(tokenHash string, policyJSON string, expiresAt string
 		return fmt.Errorf("update token: %w", err)
 	}
 
+	s.emit(events.TokenUpdated, map[string]interface{}{
+		"token_hash": keyPrefix([]byte(tokenHash)), "expires_at": expiresAt,
+	})
+
 	return s.Reload()
 }
 
@@ -259,6 +281,11 @@ func (s *BoltStore) Delete(tokenHash string) error {
 	if !found {
 		return fmt.Errorf("token not found")
 	}
+
+	s.emit(events.TokenDeleted, map[string]interface{}{
+		"token_hash": keyPrefix([]byte(tokenHash)),
+	})
+
 	return s.Reload()
 }
 
@@ -271,6 +298,10 @@ func (s *BoltStore) Lookup(tokenHash string) (*policy.Policy, error) {
 	}
 	// Check expiration
 	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
+		s.emit(events.TokenExpired, map[string]interface{}{
+			"token_hash": keyPrefix([]byte(tokenHash)),
+			"expired_at": entry.expiresAt.Format(time.RFC3339),
+		})
 		return nil, nil
 	}
 	return entry.policy, nil

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rickcrawford/tokenomics/internal/config"
+	"github.com/rickcrawford/tokenomics/internal/events"
 	"github.com/rickcrawford/tokenomics/internal/proxy"
 	"github.com/rickcrawford/tokenomics/internal/session"
 	"github.com/rickcrawford/tokenomics/internal/store"
@@ -42,9 +43,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		dbFile = dbPath
 	}
 
+	// Init event emitter (early, so store can use it)
+	emitter := buildEmitter(cfg.Events)
+	defer emitter.Close()
+
 	// Init token store (with optional at-rest encryption)
 	encKey := os.Getenv(cfg.Security.EncryptionKeyEnv)
 	tokenStore := store.NewBoltStore(dbFile, encKey)
+	tokenStore.SetEmitter(emitter)
 	if err := tokenStore.Init(); err != nil {
 		return fmt.Errorf("init store: %w", err)
 	}
@@ -67,8 +73,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Get hash key
 	hashKey := getHashKey(cfg.Security.HashKeyEnv)
 
-	// Create proxy handler with provider configs
-	handler := proxy.NewHandler(tokenStore, sessStore, hashKey, cfg.Server.UpstreamURL, cfg.Providers)
+	// Create proxy handler with provider configs and event emitter
+	handler := proxy.NewHandler(tokenStore, sessStore, hashKey, cfg.Server.UpstreamURL, cfg.Providers, emitter)
 
 	// Wire up Redis memory writer if Redis session backend is configured
 	if rs, ok := sessStore.(*session.RedisStore); ok {
@@ -171,6 +177,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
+	// Emit server.start event (the "on load" event for key sync and readiness)
+	emitter.Emit(context.Background(), events.New(events.ServerStart, map[string]interface{}{
+		"http_port":  cfg.Server.HTTPPort,
+		"https_port": cfg.Server.HTTPSPort,
+		"tls":        cfg.Server.TLS.Enabled,
+		"upstream":   cfg.Server.UpstreamURL,
+	}))
+
 	log.Println("Tokenomics proxy started. Press Ctrl+C to stop.")
 
 	select {
@@ -181,4 +195,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// buildEmitter constructs the event emitter from config.
+// Returns a Nop emitter if no webhooks are configured.
+func buildEmitter(cfg config.EventsConfig) events.Emitter {
+	if len(cfg.Webhooks) == 0 {
+		return events.Nop{}
+	}
+
+	emitters := make([]events.Emitter, 0, len(cfg.Webhooks))
+	for _, wh := range cfg.Webhooks {
+		emitters = append(emitters, events.NewWebhookEmitter(events.WebhookConfig{
+			URL:        wh.URL,
+			Secret:     wh.Secret,
+			SigningKey:  wh.SigningKey,
+			Events:     wh.Events,
+			TimeoutSec: wh.TimeoutSec,
+		}))
+		log.Printf("Webhook registered: %s (events: %v)", wh.URL, wh.Events)
+	}
+
+	if len(emitters) == 1 {
+		return emitters[0]
+	}
+	return events.NewMulti(emitters...)
 }

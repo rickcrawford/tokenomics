@@ -54,7 +54,7 @@ func setupTestHandler(t *testing.T, providers map[string]config.ProviderConfig, 
 	upstream := httptest.NewServer(upstreamHandler)
 
 	ts := newMockTokenStore()
-	handler := NewHandler(ts, session.NewMemoryStore(), []byte("testkey"), upstream.URL, providers)
+	handler := NewHandler(ts, session.NewMemoryStore(), []byte("testkey"), upstream.URL, providers, nil)
 
 	return handler, ts, upstream
 }
