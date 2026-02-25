@@ -27,7 +27,10 @@ import (
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the reverse proxy server",
-	RunE:  runServe,
+	Example: `  tokenomics serve
+  tokenomics serve --config /etc/tokenomics/config.yaml
+  tokenomics serve --db /tmp/test.db`,
+	RunE: runServe,
 }
 
 func init() {
@@ -91,17 +94,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	tokenStore.StartFileWatch(5 * time.Second)
 
 	// Remote sync (if configured)
+	var remoteClient *remote.Client
 	if cfg.Remote.URL != "" {
-		rc := buildRemoteClient(cfg.Remote)
-		n, err := rc.SyncTo(tokenStore)
+		remoteClient = buildRemoteClient(cfg.Remote)
+		n, err := remoteClient.SyncTo(tokenStore)
 		if err != nil {
 			log.Printf("Remote sync failed: %v (continuing with local tokens)", err)
 		} else {
 			log.Printf("Remote sync: %d token(s) loaded from %s", n, cfg.Remote.URL)
 		}
 		if cfg.Remote.SyncSec > 0 {
-			rc.StartPeriodicSync(tokenStore, time.Duration(cfg.Remote.SyncSec)*time.Second)
-			defer rc.Stop()
+			remoteClient.StartPeriodicSync(tokenStore, time.Duration(cfg.Remote.SyncSec)*time.Second)
+			defer remoteClient.Stop()
 		}
 	}
 
@@ -144,6 +148,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 	r.Get("/stats", handler.Stats().StatsHandler)
+
+	// Webhook receiver for push-based token sync
+	if cfg.Remote.Webhook.Enabled {
+		receiver := remote.NewWebhookReceiver(cfg.Remote.Webhook, tokenStore, remoteClient)
+		r.Post(receiver.Path(), receiver.ServeHTTP)
+		log.Printf("Webhook receiver enabled on POST %s", receiver.Path())
+	}
 
 	// All other routes go through the proxy handler
 	r.Handle("/*", handler)
@@ -269,7 +280,7 @@ func buildEmitter(cfg config.EventsConfig) events.Emitter {
 		emitters = append(emitters, events.NewWebhookEmitter(events.WebhookConfig{
 			URL:        wh.URL,
 			Secret:     wh.Secret,
-			SigningKey:  wh.SigningKey,
+			SigningKey: wh.SigningKey,
 			Events:     wh.Events,
 			TimeoutSec: wh.TimeoutSec,
 		}))

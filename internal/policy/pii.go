@@ -10,17 +10,17 @@ import (
 type PIIType string
 
 const (
-	PIITypeSSN             PIIType = "ssn"
-	PIITypeCreditCard      PIIType = "credit_card"
-	PIITypeEmail           PIIType = "email"
-	PIITypePhone           PIIType = "phone"
-	PIITypeIPAddress       PIIType = "ip_address"
-	PIITypeAWSKey          PIIType = "aws_key"
-	PIITypeAPIKey          PIIType = "api_key"
-	PIITypeJWT             PIIType = "jwt"
-	PIITypePrivateKey      PIIType = "private_key"
+	PIITypeSSN              PIIType = "ssn"
+	PIITypeCreditCard       PIIType = "credit_card"
+	PIITypeEmail            PIIType = "email"
+	PIITypePhone            PIIType = "phone"
+	PIITypeIPAddress        PIIType = "ip_address"
+	PIITypeAWSKey           PIIType = "aws_key"
+	PIITypeAPIKey           PIIType = "api_key"
+	PIITypeJWT              PIIType = "jwt"
+	PIITypePrivateKey       PIIType = "private_key"
 	PIITypeConnectionString PIIType = "connection_string"
-	PIITypeGitHubToken     PIIType = "github_token"
+	PIITypeGitHubToken      PIIType = "github_token"
 )
 
 // piiDetector holds a compiled pattern for a PII type.

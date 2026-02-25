@@ -49,10 +49,10 @@ type RuleMatchLog struct {
 func extractUpstreamRequestID(h http.Header) string {
 	// Try provider-specific headers in priority order
 	for _, key := range []string{
-		"X-Request-Id",            // OpenAI, Azure OpenAI
-		"Request-Id",              // Anthropic
-		"Apim-Request-Id",         // Azure API Management
-		"Mistral-Correlation-Id",  // Mistral
+		"X-Request-Id",           // OpenAI, Azure OpenAI
+		"Request-Id",             // Anthropic
+		"Apim-Request-Id",        // Azure API Management
+		"Mistral-Correlation-Id", // Mistral
 	} {
 		if v := h.Get(key); v != "" {
 			return v

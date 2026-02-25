@@ -141,9 +141,9 @@ type Client struct {
 	apiKey     string
 	httpClient *http.Client
 
-	mu       sync.Mutex
-	stopCh   chan struct{}
-	stopped  bool
+	mu      sync.Mutex
+	stopCh  chan struct{}
+	stopped bool
 }
 
 // NewClient creates a remote config client.

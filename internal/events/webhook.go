@@ -18,7 +18,7 @@ import (
 type WebhookConfig struct {
 	URL        string   `mapstructure:"url" json:"url"`
 	Secret     string   `mapstructure:"secret" json:"secret,omitempty"`           // Shared secret sent as X-Webhook-Secret header
-	SigningKey  string   `mapstructure:"signing_key" json:"signing_key,omitempty"` // HMAC-SHA256 signing key; signature sent as X-Webhook-Signature
+	SigningKey string   `mapstructure:"signing_key" json:"signing_key,omitempty"` // HMAC-SHA256 signing key; signature sent as X-Webhook-Signature
 	Events     []string `mapstructure:"events" json:"events,omitempty"`           // Event type filter (supports trailing * wildcard); empty = all
 	TimeoutSec int      `mapstructure:"timeout" json:"timeout,omitempty"`         // HTTP timeout in seconds (default 10)
 }

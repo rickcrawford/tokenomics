@@ -62,9 +62,9 @@ func TestGetUsage(t *testing.T) {
 
 func TestAddUsage(t *testing.T) {
 	tests := []struct {
-		name       string
-		additions  []int64
-		wantFinal  int64
+		name      string
+		additions []int64
+		wantFinal int64
 	}{
 		{
 			name:      "single addition",

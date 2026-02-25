@@ -1,0 +1,22 @@
+{
+  "base_key_env": "OPENAI_API_KEY",
+  "model": "gpt-4o-mini",
+  "max_tokens": 500000,
+  "timeout": 30,
+  "rate_limit": {
+    "rules": [
+      { "requests": 30, "window": "1m" },
+      { "tokens": 500000, "window": "24h", "strategy": "fixed" }
+    ],
+    "max_parallel": 3
+  },
+  "retry": {
+    "max_retries": 2,
+    "fallbacks": ["gpt-4o-mini"],
+    "retry_on": [429, 500, 502, 503]
+  },
+  "metadata": {
+    "role": "ci-pipeline",
+    "team": "automation"
+  }
+}

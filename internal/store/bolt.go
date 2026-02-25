@@ -82,7 +82,7 @@ func (s *BoltStore) Init() error {
 }
 
 type boltRecord struct {
-	PolicyJSON string `json:"policy"`            // Plaintext JSON (when no encryption)
+	PolicyJSON string `json:"policy"`              // Plaintext JSON (when no encryption)
 	Encrypted  string `json:"encrypted,omitempty"` // Base64 AES-256-GCM ciphertext (when encrypted)
 	CreatedAt  string `json:"created_at"`
 	ExpiresAt  string `json:"expires_at,omitempty"`

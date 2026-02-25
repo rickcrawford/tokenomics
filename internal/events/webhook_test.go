@@ -91,7 +91,7 @@ func TestWebhookEmitter_HMACSigning(t *testing.T) {
 
 	emitter := NewWebhookEmitter(WebhookConfig{
 		URL:        ts.URL,
-		SigningKey:  signingKey,
+		SigningKey: signingKey,
 	})
 
 	emitter.Emit(context.Background(), New(RuleViolation, map[string]interface{}{
@@ -132,11 +132,11 @@ func TestWebhookEmitter_EventFilter(t *testing.T) {
 		Events: []string{"token.*", "rule.violation"},
 	})
 
-	emitter.Emit(context.Background(), New(TokenCreated, nil))    // matches token.*
-	emitter.Emit(context.Background(), New(TokenDeleted, nil))    // matches token.*
-	emitter.Emit(context.Background(), New(RuleViolation, nil))   // matches rule.violation exactly
-	emitter.Emit(context.Background(), New(RuleWarning, nil))     // does NOT match
-	emitter.Emit(context.Background(), New(BudgetExceeded, nil))  // does NOT match
+	emitter.Emit(context.Background(), New(TokenCreated, nil))     // matches token.*
+	emitter.Emit(context.Background(), New(TokenDeleted, nil))     // matches token.*
+	emitter.Emit(context.Background(), New(RuleViolation, nil))    // matches rule.violation exactly
+	emitter.Emit(context.Background(), New(RuleWarning, nil))      // does NOT match
+	emitter.Emit(context.Background(), New(BudgetExceeded, nil))   // does NOT match
 	emitter.Emit(context.Background(), New(RequestCompleted, nil)) // does NOT match
 
 	emitter.Close()
