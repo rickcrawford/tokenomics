@@ -18,6 +18,45 @@ You gave an intern an API key. They discovered `gpt-4o`. Your CFO discovered the
 
 Tokenomics sits between your agents and your providers so you can cap spend, pick models, rate limit, block bad content, mask PII, inject prompts, retry with fallbacks, and route across 16+ providers. All without changing a single line in your agent code.
 
+## Installation
+
+**Option 1: One-liner (Recommended)**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rickcrawford/tokenomics/main/install.sh | bash
+```
+
+**Option 2: Manual installation**
+
+```bash
+# Download latest release for your OS
+curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/tokenomics-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/').tar.gz | tar -xz
+
+# Move to PATH
+sudo mv tokenomics /usr/local/bin/
+```
+
+**Option 3: Build from source**
+
+```bash
+git clone https://github.com/rickcrawford/tokenomics.git
+cd tokenomics
+make build
+sudo cp bin/tokenomics /usr/local/bin/
+```
+
+**Install to custom directory**
+
+```bash
+bash install.sh /opt/tokenomics
+export PATH="/opt/tokenomics:$PATH"
+```
+
+Verify installation:
+```bash
+tokenomics --help
+```
+
 ## Quick Start
 
 **First time setup — Install the CA certificate:**
