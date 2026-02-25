@@ -6,6 +6,7 @@
 # Each provider specifies:
 #   upstream_url  - Base URL for the provider's API
 #   api_key_env   - Environment variable holding the API key
+#   base_url_env  - Environment variable for client base URL (used by init/run)
 #   auth_scheme   - How to send the key: "bearer" (default), "header", "query"
 #   auth_header   - Custom header name (default: "Authorization")
 #   headers       - Extra headers sent with every request
@@ -18,6 +19,7 @@ providers:
   openai:
     upstream_url: https://api.openai.com
     api_key_env: OPENAI_API_KEY
+    base_url_env: OPENAI_BASE_URL
     models:
       - gpt-4o
       - gpt-4o-mini
@@ -35,6 +37,7 @@ providers:
   anthropic:
     upstream_url: https://api.anthropic.com
     api_key_env: ANTHROPIC_API_KEY
+    base_url_env: ANTHROPIC_BASE_URL
     auth_scheme: header
     auth_header: x-api-key
     headers:
@@ -56,6 +59,7 @@ providers:
   azure_openai:
     upstream_url: https://{resource}.openai.azure.com
     api_key_env: AZURE_OPENAI_API_KEY
+    base_url_env: AZURE_OPENAI_ENDPOINT
     auth_scheme: header
     auth_header: api-key
     headers:
@@ -72,6 +76,7 @@ providers:
   google_gemini:
     upstream_url: https://generativelanguage.googleapis.com
     api_key_env: GOOGLE_API_KEY
+    base_url_env: GEMINI_BASE_URL
     auth_scheme: query
     chat_path: /v1beta/models/{model}:generateContent
     models:
@@ -88,6 +93,7 @@ providers:
   vertex_ai:
     upstream_url: https://{location}-aiplatform.googleapis.com
     api_key_env: VERTEX_AI_TOKEN
+    base_url_env: VERTEX_AI_BASE_URL
     chat_path: /v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent
     models:
       - gemini-2.5-pro
@@ -98,6 +104,7 @@ providers:
   mistral:
     upstream_url: https://api.mistral.ai
     api_key_env: MISTRAL_API_KEY
+    base_url_env: MISTRAL_BASE_URL
     models:
       - mistral-large-latest
       - mistral-medium-latest
@@ -111,6 +118,7 @@ providers:
   cohere:
     upstream_url: https://api.cohere.com
     api_key_env: COHERE_API_KEY
+    base_url_env: COHERE_BASE_URL
     chat_path: /v2/chat
     models:
       - command-r-plus
@@ -122,6 +130,7 @@ providers:
   groq:
     upstream_url: https://api.groq.com/openai
     api_key_env: GROQ_API_KEY
+    base_url_env: GROQ_BASE_URL
     models:
       - llama-3.3-70b-versatile
       - llama-3.1-8b-instant
@@ -133,6 +142,7 @@ providers:
   together:
     upstream_url: https://api.together.xyz
     api_key_env: TOGETHER_API_KEY
+    base_url_env: TOGETHER_BASE_URL
     models:
       - meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo
       - meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
@@ -144,6 +154,7 @@ providers:
   fireworks:
     upstream_url: https://api.fireworks.ai/inference
     api_key_env: FIREWORKS_API_KEY
+    base_url_env: FIREWORKS_BASE_URL
     models:
       - accounts/fireworks/models/llama-v3p1-405b-instruct
       - accounts/fireworks/models/llama-v3p1-70b-instruct
@@ -154,6 +165,7 @@ providers:
   perplexity:
     upstream_url: https://api.perplexity.ai
     api_key_env: PERPLEXITY_API_KEY
+    base_url_env: PERPLEXITY_BASE_URL
     models:
       - sonar-pro
       - sonar
@@ -164,6 +176,7 @@ providers:
   deepseek:
     upstream_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
+    base_url_env: DEEPSEEK_BASE_URL
     models:
       - deepseek-chat
       - deepseek-reasoner
@@ -172,6 +185,7 @@ providers:
   xai:
     upstream_url: https://api.x.ai
     api_key_env: XAI_API_KEY
+    base_url_env: XAI_BASE_URL
     models:
       - grok-2
       - grok-2-mini
@@ -184,6 +198,7 @@ providers:
   openrouter:
     upstream_url: https://openrouter.ai/api
     api_key_env: OPENROUTER_API_KEY
+    base_url_env: OPENROUTER_BASE_URL
     models:
       - openai/gpt-4o
       - anthropic/claude-3-opus
@@ -195,6 +210,7 @@ providers:
   ollama:
     upstream_url: http://localhost:11434
     api_key_env: ""
+    base_url_env: OLLAMA_BASE_URL
     auth_scheme: header
     auth_header: ""
     chat_path: /api/chat
@@ -212,6 +228,7 @@ providers:
   vllm:
     upstream_url: http://localhost:8000
     api_key_env: VLLM_API_KEY
+    base_url_env: VLLM_BASE_URL
     models: []
 
   # ── LiteLLM Proxy ──────────────────────────────────────────────────────
@@ -219,4 +236,5 @@ providers:
   litellm:
     upstream_url: http://localhost:4000
     api_key_env: LITELLM_API_KEY
+    base_url_env: LITELLM_BASE_URL
     models: []

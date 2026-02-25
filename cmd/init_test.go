@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"testing"
+
+	"github.com/rickcrawford/tokenomics/internal/config"
 )
 
 func TestResolveEnvPairs(t *testing.T) {
@@ -206,5 +208,192 @@ func TestResolveEnvPairs_NonGenericDoesNotAppend_v1(t *testing.T) {
 				t.Errorf("provider %q base URL = %q, want %q", p, baseURLPair.Value, "https://proxy:8443")
 			}
 		})
+	}
+}
+
+// --- Tests for config-aware resolution ---
+
+func TestResolveEnvPairsWithConfig_UsesProviderConfig(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"deepseek": {
+				APIKeyEnv:  "DEEPSEEK_API_KEY",
+				BaseURLEnv: "DEEPSEEK_BASE_URL",
+			},
+			"mistral": {
+				APIKeyEnv:  "MISTRAL_API_KEY",
+				BaseURLEnv: "MISTRAL_BASE_URL",
+			},
+		},
+	}
+
+	pairs := resolveEnvPairsWithConfig(cfg, "deepseek", "tok", "https://proxy:8443", "", "")
+	if len(pairs) != 2 {
+		t.Fatalf("expected 2 pairs, got %d: %v", len(pairs), pairs)
+	}
+	if pairs[0].Key != "DEEPSEEK_API_KEY" {
+		t.Errorf("key env = %q, want DEEPSEEK_API_KEY", pairs[0].Key)
+	}
+	if pairs[1].Key != "DEEPSEEK_BASE_URL" {
+		t.Errorf("base url env = %q, want DEEPSEEK_BASE_URL", pairs[1].Key)
+	}
+	// DeepSeek is OpenAI-compatible so should get /v1
+	if pairs[1].Value != "https://proxy:8443/v1" {
+		t.Errorf("base url = %q, want https://proxy:8443/v1", pairs[1].Value)
+	}
+}
+
+func TestResolveEnvPairsWithConfig_CustomOverride(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"deepseek": {APIKeyEnv: "DEEPSEEK_API_KEY"},
+		},
+	}
+
+	// Custom env vars should still take precedence over config
+	pairs := resolveEnvPairsWithConfig(cfg, "deepseek", "tok", "https://proxy:8443", "MY_KEY", "MY_URL")
+	if pairs[0].Key != "MY_KEY" || pairs[1].Key != "MY_URL" {
+		t.Errorf("custom overrides should win, got %v", pairs)
+	}
+}
+
+func TestResolveEnvPairsWithConfig_FallsBackToHardcoded(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{},
+	}
+
+	// Provider not in config should fall back to hardcoded
+	pairs := resolveEnvPairsWithConfig(cfg, "anthropic", "tok", "https://proxy:8443", "", "")
+	if pairs[0].Key != "ANTHROPIC_API_KEY" {
+		t.Errorf("should fall back to hardcoded, got %v", pairs)
+	}
+}
+
+func TestResolveEnvPairsWithConfig_NilConfig(t *testing.T) {
+	// Nil config should work (falls back to hardcoded)
+	pairs := resolveEnvPairsWithConfig(nil, "generic", "tok", "https://proxy:8443", "", "")
+	if pairs[0].Key != "OPENAI_API_KEY" {
+		t.Errorf("nil config should fall back, got %v", pairs)
+	}
+}
+
+func TestResolveAllProviderPairs(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				APIKeyEnv:  "OPENAI_API_KEY",
+				BaseURLEnv: "OPENAI_BASE_URL",
+			},
+			"anthropic": {
+				APIKeyEnv:  "ANTHROPIC_API_KEY",
+				BaseURLEnv: "ANTHROPIC_BASE_URL",
+			},
+		},
+	}
+
+	pairs := resolveAllProviderPairs(cfg, "tok", "https://proxy:8443")
+
+	// Should have 4 pairs (2 per provider)
+	if len(pairs) != 4 {
+		t.Fatalf("expected 4 pairs, got %d: %v", len(pairs), pairs)
+	}
+
+	// Should be sorted alphabetically by provider name
+	keys := make(map[string]string)
+	for _, p := range pairs {
+		keys[p.Key] = p.Value
+	}
+
+	if keys["ANTHROPIC_API_KEY"] != "tok" {
+		t.Error("missing ANTHROPIC_API_KEY")
+	}
+	if keys["OPENAI_API_KEY"] != "tok" {
+		t.Error("missing OPENAI_API_KEY")
+	}
+	if keys["OPENAI_BASE_URL"] != "https://proxy:8443/v1" {
+		t.Errorf("OPENAI_BASE_URL = %q, want /v1 suffix", keys["OPENAI_BASE_URL"])
+	}
+	if keys["ANTHROPIC_BASE_URL"] != "https://proxy:8443" {
+		t.Errorf("ANTHROPIC_BASE_URL = %q, want no /v1 suffix", keys["ANTHROPIC_BASE_URL"])
+	}
+}
+
+func TestResolveAllProviderPairs_NilConfig(t *testing.T) {
+	pairs := resolveAllProviderPairs(nil, "tok", "https://proxy:8443")
+	if len(pairs) != 2 {
+		t.Fatalf("nil config should return generic pairs, got %d", len(pairs))
+	}
+	if pairs[0].Key != "OPENAI_API_KEY" {
+		t.Errorf("expected OPENAI_API_KEY, got %q", pairs[0].Key)
+	}
+}
+
+func TestResolveAllProviderPairs_Deduplicates(t *testing.T) {
+	cfg := &config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"openai": {
+				APIKeyEnv:  "OPENAI_API_KEY",
+				BaseURLEnv: "OPENAI_BASE_URL",
+			},
+			// Another provider that happens to use the same env var name
+			"openai_compat": {
+				APIKeyEnv:  "OPENAI_API_KEY",
+				BaseURLEnv: "OPENAI_BASE_URL",
+			},
+		},
+	}
+
+	pairs := resolveAllProviderPairs(cfg, "tok", "https://proxy:8443")
+
+	keyCount := make(map[string]int)
+	for _, p := range pairs {
+		keyCount[p.Key]++
+	}
+	for k, c := range keyCount {
+		if c > 1 {
+			t.Errorf("duplicate env var %q appeared %d times", k, c)
+		}
+	}
+}
+
+func TestNeedsV1Suffix(t *testing.T) {
+	v1Providers := []string{"openai", "generic", "groq", "deepseek", "xai", "openrouter"}
+	for _, p := range v1Providers {
+		if !needsV1Suffix(p) {
+			t.Errorf("expected needsV1Suffix(%q) = true", p)
+		}
+	}
+
+	noV1Providers := []string{"anthropic", "azure_openai", "google_gemini", "cohere", "ollama"}
+	for _, p := range noV1Providers {
+		if needsV1Suffix(p) {
+			t.Errorf("expected needsV1Suffix(%q) = false", p)
+		}
+	}
+}
+
+func TestIsProxyToken(t *testing.T) {
+	if !isProxyToken("tkn_abc123") {
+		t.Error("should detect tkn_ prefix")
+	}
+	if isProxyToken("sk-proj-abc123") {
+		t.Error("should not match sk-proj- prefix")
+	}
+	if isProxyToken("") {
+		t.Error("should not match empty string")
+	}
+}
+
+func TestEnvPairsFromProviderConfig_GeneratesDefaultEnvNames(t *testing.T) {
+	// Provider with no base_url_env should generate one from the name
+	pc := config.ProviderConfig{
+		APIKeyEnv: "CUSTOM_KEY",
+	}
+	pairs := envPairsFromProviderConfig("my-provider", pc, "tok", "https://proxy:8443")
+	if pairs[0].Key != "CUSTOM_KEY" {
+		t.Errorf("key env = %q, want CUSTOM_KEY", pairs[0].Key)
+	}
+	if pairs[1].Key != "MY_PROVIDER_BASE_URL" {
+		t.Errorf("base url env = %q, want MY_PROVIDER_BASE_URL", pairs[1].Key)
 	}
 }

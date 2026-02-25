@@ -56,6 +56,7 @@ type WebhookEndpoint struct {
 type ProviderConfig struct {
 	UpstreamURL string            `mapstructure:"upstream_url" json:"upstream_url"`
 	APIKeyEnv   string            `mapstructure:"api_key_env" json:"api_key_env"`
+	BaseURLEnv  string            `mapstructure:"base_url_env" json:"base_url_env,omitempty"` // Env var for base URL override (e.g. "OPENAI_BASE_URL")
 	AuthHeader  string            `mapstructure:"auth_header" json:"auth_header,omitempty"`   // Custom auth header name (default: "Authorization")
 	AuthScheme  string            `mapstructure:"auth_scheme" json:"auth_scheme,omitempty"`   // "bearer" (default), "header" (raw value in auth_header), "query" (appended as ?key=)
 	Headers     map[string]string `mapstructure:"headers" json:"headers,omitempty"`           // Extra headers sent with every request

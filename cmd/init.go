@@ -9,10 +9,12 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/rickcrawford/tokenomics/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -21,9 +23,17 @@ var initCmd = &cobra.Command{
 	Short: "Configure an agent CLI to use the tokenomics proxy",
 	Long: `Sets environment variables or writes config for an agent framework
 (OpenAI, Anthropic, Azure, Gemini, or custom) to route API calls through the proxy.
-Can optionally start the proxy in the background.`,
+Can optionally start the proxy in the background.
+
+The --provider flag accepts any provider name from providers.yaml (e.g. deepseek,
+groq, mistral) in addition to the built-in aliases (generic, anthropic, azure, gemini).
+
+Use --provider all to set environment variables for every configured provider at once,
+routing all SDK traffic through the proxy with a single command.`,
 	Example: `  eval $(tokenomics init --token tkn_abc123)
   tokenomics init --token tkn_abc123 --provider anthropic --output dotenv
+  tokenomics init --token tkn_abc123 --provider deepseek --output shell
+  tokenomics init --token tkn_abc123 --provider all --output dotenv
   tokenomics init --token tkn_abc123 --output json
   tokenomics init --proxy-url https://proxy.company.com:8443 --token tkn_abc123`,
 	RunE: runInit,
@@ -53,7 +63,7 @@ func init() {
 	initCmd.Flags().IntVar(&initPort, "port", 8443, "proxy port (only used if starting local proxy)")
 	initCmd.Flags().BoolVar(&initTLS, "tls", true, "use HTTPS (only used if starting local proxy)")
 	initCmd.Flags().BoolVar(&initInsecure, "insecure", false, "skip TLS verification (not recommended; install valid certificates instead)")
-	initCmd.Flags().StringVar(&initProvider, "provider", "generic", "target provider (generic, anthropic, azure, gemini, custom)")
+	initCmd.Flags().StringVar(&initProvider, "provider", "generic", "target provider, provider name from config, or 'all' for every configured provider")
 	initCmd.Flags().StringVar(&initEnvKey, "env-key", "", "custom env var name for the API key")
 	initCmd.Flags().StringVar(&initEnvBase, "env-base-url", "", "custom env var name for the base URL")
 	initCmd.Flags().StringVar(&initOutputFmt, "output", "shell", "output format (shell, dotenv, json)")
@@ -106,7 +116,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	pairs := ResolveEnvPairs(initProvider, initToken, baseURL, initEnvKey, initEnvBase)
+	// Load config for provider-aware resolution and auto-detection
+	cfg, _ := config.Load(cfgFile)
+
+	// Auto-detect provider from args or cli_maps if not explicitly set
+	if initProvider == "generic" && cfg != nil && len(args) > 0 {
+		if mapped, ok := cfg.CLIMaps[args[0]]; ok {
+			initProvider = mapped
+		}
+	}
+
+	// Resolve env pairs
+	var pairs []EnvPair
+	if initProvider == "all" {
+		pairs = resolveAllProviderPairs(cfg, initToken, baseURL)
+	} else {
+		pairs = resolveEnvPairsWithConfig(cfg, initProvider, initToken, baseURL, initEnvKey, initEnvBase)
+	}
 
 	if initInsecure {
 		pairs = append(pairs, EnvPair{"NODE_TLS_REJECT_UNAUTHORIZED", "0"})
@@ -122,6 +148,106 @@ func runInit(cmd *cobra.Command, args []string) error {
 	default:
 		return fmt.Errorf("unknown output format: %s", initOutputFmt)
 	}
+}
+
+// resolveEnvPairsWithConfig tries the provider config first, then falls back
+// to the hardcoded ResolveEnvPairs for backward compatibility.
+func resolveEnvPairsWithConfig(cfg *config.Config, provider, token, baseURL, envKey, envBase string) []EnvPair {
+	// Custom overrides always win
+	if envKey != "" && envBase != "" {
+		return []EnvPair{
+			{envKey, token},
+			{envBase, baseURL},
+		}
+	}
+
+	// Try to resolve from provider config
+	if cfg != nil {
+		if pc, ok := cfg.Providers[provider]; ok {
+			return envPairsFromProviderConfig(provider, pc, token, baseURL)
+		}
+		// Also try case-insensitive lookup
+		for name, pc := range cfg.Providers {
+			if strings.EqualFold(name, provider) {
+				return envPairsFromProviderConfig(name, pc, token, baseURL)
+			}
+		}
+	}
+
+	// Fall back to hardcoded resolution for well-known aliases
+	return ResolveEnvPairs(provider, token, baseURL, envKey, envBase)
+}
+
+// envPairsFromProviderConfig builds env pairs using the provider's configured
+// api_key_env and base_url_env fields.
+func envPairsFromProviderConfig(name string, pc config.ProviderConfig, token, baseURL string) []EnvPair {
+	pairs := []EnvPair{}
+
+	// API key env var
+	keyEnv := pc.APIKeyEnv
+	if keyEnv == "" {
+		// Some providers (like ollama) don't need a key, but we still set the
+		// base URL so tools that support it can find the proxy.
+		keyEnv = strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
+	}
+	pairs = append(pairs, EnvPair{keyEnv, token})
+
+	// Base URL env var
+	urlEnv := pc.BaseURLEnv
+	if urlEnv == "" {
+		urlEnv = strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_BASE_URL"
+	}
+
+	// OpenAI-compatible providers typically need /v1 appended
+	url := baseURL
+	if needsV1Suffix(name) {
+		url = baseURL + "/v1"
+	}
+	pairs = append(pairs, EnvPair{urlEnv, url})
+
+	return pairs
+}
+
+// needsV1Suffix returns true for providers whose SDKs expect a /v1 path suffix.
+func needsV1Suffix(provider string) bool {
+	switch strings.ToLower(provider) {
+	case "openai", "generic", "groq", "together", "fireworks",
+		"perplexity", "deepseek", "xai", "openrouter", "vllm", "litellm":
+		return true
+	}
+	return false
+}
+
+// resolveAllProviderPairs generates env pairs for every configured provider.
+// This lets users route all SDK traffic through the proxy with one command.
+func resolveAllProviderPairs(cfg *config.Config, token, baseURL string) []EnvPair {
+	if cfg == nil || len(cfg.Providers) == 0 {
+		// No config, just set the generic OpenAI vars
+		return ResolveEnvPairs("generic", token, baseURL, "", "")
+	}
+
+	seen := make(map[string]bool)
+	var pairs []EnvPair
+
+	// Sort for deterministic output
+	names := make([]string, 0, len(cfg.Providers))
+	for name := range cfg.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		pc := cfg.Providers[name]
+		for _, pair := range envPairsFromProviderConfig(name, pc, token, baseURL) {
+			// Deduplicate: first provider to claim an env var wins
+			if !seen[pair.Key] {
+				seen[pair.Key] = true
+				pairs = append(pairs, pair)
+			}
+		}
+	}
+
+	return pairs
 }
 
 func startProxyDaemon(baseURL string) error {
@@ -239,6 +365,8 @@ func processAlive(pid int) bool {
 }
 
 // ResolveEnvPairs determines the environment variable pairs for the given CLI target.
+// This is the legacy resolution path using hardcoded provider mappings. New code
+// should use resolveEnvPairsWithConfig which reads from providers.yaml.
 func ResolveEnvPairs(cli, token, baseURL, envKey, envBase string) []EnvPair {
 	if envKey != "" && envBase != "" {
 		return []EnvPair{
