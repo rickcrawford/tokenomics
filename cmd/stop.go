@@ -1,0 +1,87 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+	"os/user"
+	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/spf13/cobra"
+)
+
+var stopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Stop the background tokenomics proxy",
+	Long: `Stops the background proxy process started by 'tokenomics init --start'.
+Sends SIGTERM, then SIGKILL if needed.`,
+	RunE: runStop,
+}
+
+var (
+	stopPidFile string
+)
+
+func init() {
+	stopCmd.Flags().StringVar(&stopPidFile, "pid-file", "", "PID file path (default: ~/.tokenomics/tokenomics.pid)")
+	rootCmd.AddCommand(stopCmd)
+}
+
+func runStop(cmd *cobra.Command, args []string) error {
+	// Resolve PID file path
+	pidFile := stopPidFile
+	if pidFile == "" {
+		u, err := user.Current()
+		if err != nil {
+			return fmt.Errorf("get current user: %w", err)
+		}
+		pidFile = filepath.Join(u.HomeDir, ".tokenomics", "tokenomics.pid")
+	}
+
+	// Read PID from file
+	pid, err := readPIDFile(pidFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Proxy not running (no PID file at %s)\n", pidFile)
+			return nil
+		}
+		return fmt.Errorf("read PID file: %w", err)
+	}
+
+	// Find and signal the process
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		// Process doesn't exist, clean up PID file
+		os.Remove(pidFile)
+		fmt.Fprintf(os.Stderr, "Proxy not running (PID %d not found)\n", pid)
+		return nil
+	}
+
+	// Send SIGTERM
+	if err := p.Signal(syscall.SIGTERM); err != nil {
+		// Process might already be dead
+		os.Remove(pidFile)
+		fmt.Fprintf(os.Stderr, "Proxy not running (signal failed)\n")
+		return nil
+	}
+
+	// Poll briefly to confirm exit
+	for i := 0; i < 30; i++ {
+		if p.Signal(syscall.Signal(0)) != nil {
+			// Process is gone
+			os.Remove(pidFile)
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// If still alive, send SIGKILL
+	if err := p.Signal(syscall.SIGKILL); err == nil {
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Remove PID file
+	os.Remove(pidFile)
+	return nil
+}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -33,7 +34,38 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 }
 
+// setupLogFile configures logging to write to a file if TOKENOMICS_LOG_FILE is set
+func setupLogFile() error {
+	logFile := os.Getenv("TOKENOMICS_LOG_FILE")
+	if logFile == "" {
+		// No explicit log file configured, use stdout
+		return nil
+	}
+
+	// Create parent directory if needed
+	dir := filepath.Dir(logFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create log directory: %w", err)
+	}
+
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+
+	log.SetOutput(f)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Printf("Logging to %s", logFile)
+
+	return nil
+}
+
 func runServe(cmd *cobra.Command, args []string) error {
+	// Set up file logging
+	if err := setupLogFile(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not set up log file: %v\n", err)
+		// Continue anyway, logs will go to stdout
+	}
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)

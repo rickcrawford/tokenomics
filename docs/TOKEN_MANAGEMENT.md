@@ -26,6 +26,26 @@ When the proxy receives a request, it hashes the incoming token with the same ke
 
 ## Creating Tokens
 
+### Important: `base_key_env` Must Match Provider Configuration
+
+The `base_key_env` in your policy must match the `api_key_env` configured for that provider in `config.yaml`.
+
+For example, if your config has:
+```yaml
+providers:
+  anthropic:
+    api_key_env: MY_ANTHROPIC_API_KEY_NEW
+```
+
+Then your token policy must use:
+```json
+"base_key_env": "MY_ANTHROPIC_API_KEY_NEW"
+```
+
+**If they don't match**, the proxy won't find the real API key and will return a 401 error.
+
+### Creating a Token
+
 ```bash
 ./bin/tokenomics token create --policy '<policy-json>'
 ```
@@ -38,9 +58,8 @@ Example:
 export TOKENOMICS_HASH_KEY="my-secret-hash-key"
 
 ./bin/tokenomics token create --policy '{
-  "base_key_env": "OPENAI_API_KEY",
-  "max_tokens": 100000,
-  "model_regex": "^gpt-4.*"
+  "base_key_env": "MY_ANTHROPIC_API_KEY_NEW",
+  "max_tokens": 100000
 }'
 ```
 

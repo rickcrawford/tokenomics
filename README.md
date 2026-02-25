@@ -20,28 +20,96 @@ Tokenomics sits between your agents and your providers so you can cap spend, pic
 
 ## Quick Start
 
+**First time setup — Install the CA certificate:**
+
 ```bash
 make build
+./bin/tokenomics serve  # Generates certs in ./certs directory
+# Follow instructions to install the CA certificate
+```
 
-export TOKENOMICS_HASH_KEY="my-secret-hash-key"
+**Then run your commands:**
+
+```bash
+# Set your wrapper token and run through the proxy
+export TOKENOMICS_KEY="tkn_my-wrapper-token"
+tokenomics run claude "What is the capital of France?"
+```
+
+That's it! The `run` command:
+- **Auto-detects the provider** (claude → anthropic, python → generic, etc.)
+- Starts the proxy (runs for your command, then stops)
+- Sets up environment variables
+- Runs your command
+- Cleans up when done
+
+**For multiple commands**, use `tokenomics init` to keep the proxy running:
+
+```bash
+export TOKENOMICS_KEY="tkn_my-wrapper-token"
+tokenomics init    # Start proxy in background (stays running)
+
+claude "prompt 1"
+python script.py
+node app.js
+
+tokenomics stop    # Stop when done
+```
+
+**No need to specify `--provider`** — it's configured in `config.yaml`:
+
+```yaml
+cli_maps:
+  claude: anthropic
+  anthropic: anthropic
+  python: generic
+  node: generic
+  curl: generic
+```
+
+**For development only** — if you can't install certificates:
+
+```bash
+tokenomics run --insecure claude "What is the capital of France?"
+```
+
+See [TLS](docs/TLS.md) for certificate installation instructions.
+
+**Alternative workflows:**
+
+```bash
+# Override auto-detection if needed
+TOKENOMICS_KEY=tkn_abc123 tokenomics run --provider azure -- python my_script.py
+
+# Start proxy manually for multiple commands
+export TOKENOMICS_KEY="tkn_my-wrapper-token"
+tokenomics init
+
+claude "prompt 1"
+python script.py
+
+tokenomics stop
+```
+
+**Full setup with policies:**
+
+```bash
+# Set up environment (or use .env file)
+export TOKENOMICS_KEY="tkn_my-wrapper-token"
 export OPENAI_API_KEY="sk-your-real-key"
 
-# Create a token with a budget, model allowlist, and PII masking
+# Create a token with a budget and PII masking
 ./bin/tokenomics token create --policy '{
   "base_key_env": "OPENAI_API_KEY",
   "max_tokens": 100000,
-  "model_regex": "^gpt-4.*",
   "rules": [
     {"type": "pii", "detect": ["ssn", "credit_card"], "action": "mask"},
     {"type": "regex", "pattern": "(?i)ignore.*instructions", "action": "fail"}
   ]
 }'
 
-# Start the proxy
-./bin/tokenomics serve
-
-# Point your agent at it
-eval $(./bin/tokenomics init --token tkn_<your-token> --port 8443 --insecure)
+# Run your agent through the proxy
+./bin/tokenomics run -- python my_script.py
 ```
 
 See [examples/](examples/) for provider configs, sample policies, env setup, and an end-to-end walkthrough.

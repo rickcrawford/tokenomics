@@ -7,7 +7,7 @@ import (
 func TestResolveEnvPairs(t *testing.T) {
 	tests := []struct {
 		name     string
-		cli      string
+		provider string
 		token    string
 		baseURL  string
 		envKey   string
@@ -16,7 +16,7 @@ func TestResolveEnvPairs(t *testing.T) {
 	}{
 		{
 			name:    "generic/openai default",
-			cli:     "generic",
+			provider: "generic",
 			token:   "tok_abc123",
 			baseURL: "https://localhost:8443",
 			envKey:  "",
@@ -28,7 +28,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "openai is treated as generic default",
-			cli:     "openai",
+			provider: "openai",
 			token:   "tok_abc123",
 			baseURL: "https://localhost:8443",
 			envKey:  "",
@@ -40,7 +40,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "empty cli is treated as generic default",
-			cli:     "",
+			provider:     "",
 			token:   "my_token",
 			baseURL: "https://proxy.example.com:9999",
 			envKey:  "",
@@ -52,7 +52,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "anthropic provider",
-			cli:     "anthropic",
+			provider:     "anthropic",
 			token:   "sk-ant-123",
 			baseURL: "https://localhost:8443",
 			envKey:  "",
@@ -64,7 +64,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "anthropic case insensitive",
-			cli:     "Anthropic",
+			provider:     "Anthropic",
 			token:   "sk-ant-123",
 			baseURL: "https://localhost:8443",
 			envKey:  "",
@@ -76,7 +76,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "azure provider",
-			cli:     "azure",
+			provider:     "azure",
 			token:   "azure-key-456",
 			baseURL: "https://localhost:8443",
 			envKey:  "",
@@ -88,7 +88,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "gemini provider",
-			cli:     "gemini",
+			provider:     "gemini",
 			token:   "gemini-key-789",
 			baseURL: "https://localhost:8443",
 			envKey:  "",
@@ -100,7 +100,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "custom env key and base override cli",
-			cli:     "anthropic",
+			provider:     "anthropic",
 			token:   "custom-tok",
 			baseURL: "https://custom.proxy:1234",
 			envKey:  "MY_CUSTOM_KEY",
@@ -112,7 +112,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "custom env key and base override generic",
-			cli:     "generic",
+			provider: "generic",
 			token:   "tok",
 			baseURL: "https://localhost:8443",
 			envKey:  "CUSTOM_API_KEY",
@@ -124,7 +124,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "only envKey set without envBase falls through to cli-based resolution",
-			cli:     "anthropic",
+			provider:     "anthropic",
 			token:   "tok",
 			baseURL: "https://localhost:8443",
 			envKey:  "ONLY_KEY",
@@ -136,7 +136,7 @@ func TestResolveEnvPairs(t *testing.T) {
 		},
 		{
 			name:    "only envBase set without envKey falls through to cli-based resolution",
-			cli:     "azure",
+			provider:     "azure",
 			token:   "tok",
 			baseURL: "https://localhost:8443",
 			envKey:  "",
@@ -150,7 +150,7 @@ func TestResolveEnvPairs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveEnvPairs(tt.cli, tt.token, tt.baseURL, tt.envKey, tt.envBase)
+			got := ResolveEnvPairs(tt.provider, tt.token, tt.baseURL, tt.envKey, tt.envBase)
 
 			if len(got) != len(tt.wantPairs) {
 				t.Fatalf("len(pairs) = %d, want %d\n  got: %v\n  want: %v",

@@ -53,15 +53,16 @@ sudo cp ./certs/ca.crt /etc/pki/ca-trust/source/anchors/tokenomics-ca.crt
 sudo update-ca-trust
 ```
 
-### Option 2: Use --insecure
+### Option 2: Use --insecure (Development Only)
 
-The `init` command's `--insecure` flag adds `NODE_TLS_REJECT_UNAUTHORIZED=0` to the environment, which disables certificate verification for Node.js-based agents:
+**Not recommended.** The `run` and `init` commands have an `--insecure` flag that skips TLS verification:
 
 ```bash
-eval $(./bin/tokenomics init --token tkn_abc123 --insecure)
+# Development only!
+tokenomics run --insecure claude "test"
 ```
 
-This is convenient for development but should not be used in production.
+This is convenient for rapid development but should **never** be used in production. **Prefer Option 1 (install the CA certificate)** instead.
 
 ### Option 3: Provide Your Own Certificates
 

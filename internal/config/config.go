@@ -16,6 +16,7 @@ type Config struct {
 	Providers map[string]ProviderConfig `mapstructure:"providers"`
 	Events    EventsConfig              `mapstructure:"events"`
 	Remote    RemoteConfig              `mapstructure:"remote"`
+	CLIMaps   map[string]string         `mapstructure:"cli_maps"` // Map CLI names to providers (e.g. "claude" -> "anthropic")
 }
 
 // LoggingConfig controls request and event logging behavior.

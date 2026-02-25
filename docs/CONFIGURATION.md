@@ -69,6 +69,13 @@ remote:
   api_key: ""                # Shared API key for authentication
   sync: 0                    # Sync interval in seconds (0 = startup only)
   insecure: false            # Skip TLS verification
+
+cli_maps:                    # Map CLI names to providers for `tokenomics run`
+  claude: anthropic          # `tokenomics run claude ...` uses anthropic provider
+  anthropic: anthropic
+  python: generic
+  node: generic
+  curl: generic
 ```
 
 ### Field Descriptions
@@ -105,6 +112,20 @@ remote:
 | `remote.api_key` | (empty) | API key for authenticating with the remote server. |
 | `remote.sync` | `0` | Sync interval in seconds. `0` means sync at startup only. |
 | `remote.insecure` | `false` | Skip TLS certificate verification for the remote server. |
+| `cli_maps` | (see below) | Maps CLI names to providers for auto-detection in `tokenomics run`. Example: `claude: anthropic` means `tokenomics run claude` uses the anthropic provider. |
+
+## Logging
+
+### File Output
+
+By default, logs are written to stdout. To write logs to a file, set the `TOKENOMICS_LOG_FILE` environment variable:
+
+```bash
+export TOKENOMICS_LOG_FILE="~/.tokenomics/tokenomics.log"
+./bin/tokenomics serve
+```
+
+The log file will be created if it doesn't exist, and logs will be appended on subsequent runs.
 
 ## Environment Variables
 
@@ -127,6 +148,7 @@ Every config field can be overridden with a `TOKENOMICS_` prefixed environment v
 | `session.redis.db` | `TOKENOMICS_SESSION_REDIS_DB` |
 | `security.hash_key_env` | `TOKENOMICS_SECURITY_HASH_KEY_ENV` |
 | `security.encryption_key_env` | `TOKENOMICS_SECURITY_ENCRYPTION_KEY_ENV` |
+| (logging output) | `TOKENOMICS_LOG_FILE` |
 | `logging.level` | `TOKENOMICS_LOGGING_LEVEL` |
 | `logging.format` | `TOKENOMICS_LOGGING_FORMAT` |
 | `logging.disable_request` | `TOKENOMICS_LOGGING_DISABLE_REQUEST` |

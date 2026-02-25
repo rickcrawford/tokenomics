@@ -158,23 +158,37 @@ func (h *Handler) getMemoryWriter(mc policy.MemoryConfig) session.MemoryWriter {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
-	// Extract bearer token
-	auth := r.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Bearer ") {
-		httpError(w, http.StatusUnauthorized, "missing or invalid Authorization header")
+	// Extract token from multiple sources (in order of preference):
+	// 1. x-api-key header (Anthropic, Gemini style)
+	// 2. Authorization: Bearer {token} (OpenAI style)
+	// 3. Authorization: {token} (raw token)
+	var rawToken string
+
+	if tk := r.Header.Get("x-api-key"); tk != "" {
+		rawToken = tk
+	} else if auth := r.Header.Get("Authorization"); auth != "" {
+		if strings.HasPrefix(auth, "Bearer ") {
+			rawToken = strings.TrimPrefix(auth, "Bearer ")
+		} else {
+			// Also accept raw token without Bearer prefix
+			rawToken = auth
+		}
+	}
+
+	if rawToken == "" {
+		httpError(w, http.StatusUnauthorized, "missing or invalid token (use x-api-key header or Authorization bearer token)")
 		logRequest(&RequestLog{
 			Timestamp:  start.UTC().Format(time.RFC3339Nano),
 			Method:     r.Method,
 			Path:       r.URL.Path,
 			StatusCode: http.StatusUnauthorized,
 			DurationMs: time.Since(start).Milliseconds(),
-			Error:      "missing or invalid Authorization header",
+			Error:      "missing or invalid token",
 			RemoteAddr: r.RemoteAddr,
 			UserAgent:  r.UserAgent(),
 		})
 		return
 	}
-	rawToken := strings.TrimPrefix(auth, "Bearer ")
 
 	// Hash token
 	tokenHash := h.hashToken(rawToken)
@@ -521,7 +535,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				return
 			}
 
-			copyHeaders(r.Header, proxyReq.Header)
+			// Remove client's Authorization header before copying, since we'll set provider-specific auth
+			clientHeaders := r.Header.Clone()
+			clientHeaders.Del("Authorization")
+			copyHeaders(clientHeaders, proxyReq.Header)
 
 			// Set auth based on provider scheme
 			switch authScheme {
@@ -534,8 +551,6 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 					proxyReq.Header.Set(authHeader, realKey)
 				}
 			case "query":
-				// Already handled above in URL; remove any Authorization header from copy
-				proxyReq.Header.Del("Authorization")
 			default: // "bearer"
 				proxyReq.Header.Set("Authorization", "Bearer "+realKey)
 			}
@@ -858,6 +873,9 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 			req.URL.Scheme = upstreamURL.Scheme
 			req.URL.Host = upstreamURL.Host
 			req.Host = upstreamURL.Host
+
+			// Remove Authorization header before setting provider-specific auth
+			req.Header.Del("Authorization")
 
 			// Apply auth based on provider scheme
 			authScheme := "bearer"

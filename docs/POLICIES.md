@@ -250,7 +250,19 @@ When a policy references `"anthropic"` as a provider name, the proxy:
 | `models` | Known model prefixes (informational) |
 | `chat_path` | Override path for chat completions endpoint |
 
-#### Auth Schemes
+#### Client Authentication Formats
+
+The Tokenomics proxy accepts wrapper tokens from clients in multiple formats to support different SDKs and CLI tools:
+
+- **`x-api-key: {token}`** — Anthropic SDK, Google Gemini SDK, Azure style
+- **`Authorization: Bearer {token}`** — OpenAI SDK, curl, generic clients
+- **`Authorization: {token}`** — Raw token format for backward compatibility
+
+All formats are equivalent. Use whichever matches your client library. Environment variables (e.g., `ANTHROPIC_API_KEY`) are automatically converted to the appropriate header format by the SDK.
+
+#### Upstream Auth Schemes
+
+The following schemes control how the proxy authenticates with upstream providers (these are configured in `providers.yaml` or policy, not client auth):
 
 - **`bearer`** (default): Sends `Authorization: Bearer <key>`
 - **`header`**: Sends `<auth_header>: <key>` (e.g., `x-api-key: sk-ant-...`)
