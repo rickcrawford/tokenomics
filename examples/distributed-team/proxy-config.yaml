@@ -1,0 +1,78 @@
+# Proxy Server
+#
+# This config is for proxy instances that route requests to LLM providers.
+# Run: ./tokenomics serve
+#
+# Tokens are synced from the central config server on startup and every 60 seconds.
+# Provider API keys must be set as environment variables on this machine.
+
+server:
+  http_port: 8080
+  https_port: 8443
+  upstream_url: https://api.openai.com
+
+  tls:
+    enabled: true
+    auto_gen: true
+    cert_dir: ./certs
+
+storage:
+  db_path: ./tokenomics.db
+
+session:
+  backend: memory
+  # For shared usage tracking across multiple proxy instances, use Redis:
+  # backend: redis
+  # redis:
+  #   addr: redis.internal:6379
+  #   password: ""
+  #   db: 0
+
+security:
+  hash_key_env: TOKENOMICS_HASH_KEY
+  encryption_key_env: TOKENOMICS_ENCRYPTION_KEY
+
+logging:
+  level: info
+  format: json
+  hide_token_hash: false
+
+# ── Remote Token Sync ──────────────────────────────────────────────────
+# Point to the central config server. Tokens are fetched on startup and
+# re-synced every 60 seconds.
+
+remote:
+  url: http://config-server:9090
+  api_key: change-me-to-match-remote-server
+  sync: 60
+  insecure: false
+
+# ── Webhook Events ─────────────────────────────────────────────────────
+# Send alerts to your monitoring stack. Uncomment and configure.
+
+events:
+  webhooks:
+    # All events for debugging
+    - url: http://localhost:9090/webhook
+      secret: change-me-webhook-secret
+      signing_key: change-me-signing-key
+      timeout: 10
+
+    # Alert channel for violations and budget overruns
+    # - url: https://hooks.slack.com/services/T.../B.../xxx
+    #   secret: slack-webhook-secret
+    #   events:
+    #     - "rule.violation"
+    #     - "budget.exceeded"
+    #     - "rate.exceeded"
+    #     - "token.expired"
+
+# ── CLI Provider Mapping ──────────────────────────────────────────────
+# Maps CLI tool names to provider configs for the init command.
+
+cli_maps:
+  claude: anthropic
+  anthropic: anthropic
+  cursor: openai
+  python: generic
+  node: generic

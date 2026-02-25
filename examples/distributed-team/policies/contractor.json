@@ -1,0 +1,45 @@
+{
+  "base_key_env": "OPENAI_API_KEY",
+  "model_regex": "^gpt-4o",
+  "max_tokens": 50000,
+  "timeout": 30,
+  "prompts": [
+    { "role": "system", "content": "You are a helpful coding assistant. Only answer programming-related questions." }
+  ],
+  "rules": [
+    {
+      "name": "pii-mask",
+      "type": "pii",
+      "detect": ["ssn", "credit_card", "email", "phone", "aws_key", "api_key"],
+      "action": "mask",
+      "scope": "both"
+    },
+    {
+      "name": "prompt-injection",
+      "type": "regex",
+      "pattern": "(?i)(ignore.*instructions|system.*prompt|you are now)",
+      "action": "fail"
+    },
+    {
+      "name": "dangerous-keywords",
+      "type": "keyword",
+      "keywords": ["jailbreak", "bypass", "override", "hack"],
+      "action": "fail"
+    }
+  ],
+  "rate_limit": {
+    "rules": [
+      { "requests": 20, "window": "1m" },
+      { "tokens": 50000, "window": "1h" }
+    ],
+    "max_parallel": 2
+  },
+  "metadata": {
+    "role": "contractor",
+    "team": "external"
+  },
+  "memory": {
+    "enabled": true,
+    "file_path": "/var/log/tokenomics/contractor-sessions.md"
+  }
+}

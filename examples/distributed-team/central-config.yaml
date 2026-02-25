@@ -1,0 +1,19 @@
+# Central Config Server
+#
+# This config is for the machine that manages the token database.
+# Run: ./tokenomics remote --addr :9090 --api-key "$TOKENOMICS_REMOTE_KEY"
+#
+# Token CRUD commands (token create, list, update, delete) run against this database.
+# Proxy instances sync tokens from this server via the REST API.
+
+storage:
+  db_path: ./tokenomics.db
+
+security:
+  hash_key_env: TOKENOMICS_HASH_KEY
+  encryption_key_env: TOKENOMICS_ENCRYPTION_KEY
+
+logging:
+  level: info
+  format: json
+  hide_token_hash: false

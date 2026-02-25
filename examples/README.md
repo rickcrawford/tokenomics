@@ -29,6 +29,18 @@ examples/
 ├── memory-sample.md             # What session memory files look like
 ├── webhook-collector/           # Sample server to receive and debug events
 │   └── main.go
+├── distributed-team/            # Full distributed team setup
+│   ├── README.md                # Architecture, quick start, role comparison
+│   ├── central-config.yaml      # Central config server
+│   ├── proxy-config.yaml        # Proxy instance with remote sync
+│   ├── providers.yaml           # Multi-provider definitions
+│   ├── .env.example             # Required env vars
+│   ├── setup.sh                 # Automated setup script
+│   └── policies/                # Role-based token policies
+│       ├── lead-engineer.json   # Full access, all providers, 1M budget
+│       ├── developer.json       # Standard access, 200k budget
+│       ├── contractor.json      # Restricted, OpenAI only, 50k budget
+│       └── ci-pipeline.json     # Automation, single model, 500k budget
 ├── providers/                   # Per-provider YAML configs
 │   ├── openai.yaml
 │   ├── anthropic.yaml
@@ -245,3 +257,21 @@ curl -s $OPENAI_BASE_URL/v1/chat/completions \
 ```
 
 Watch Terminal 1. You'll see `server.start`, `token.created`, `budget.update`, and `request.completed` events flow in.
+
+## Distributed Team Setup
+
+For teams sharing a single proxy with role-based access, see the [distributed-team](distributed-team/) example. It includes:
+
+- Central config server for token management
+- Proxy instance with remote token sync
+- Four role-based policies (lead engineer, developer, contractor, CI pipeline)
+- Automated setup script
+- Multi-proxy scaling with optional Redis session backend
+
+```bash
+# Quick start
+source examples/distributed-team/.env.example
+./examples/distributed-team/setup.sh
+```
+
+See [`distributed-team/README.md`](distributed-team/README.md) for the full walkthrough.
