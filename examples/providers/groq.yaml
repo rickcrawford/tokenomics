@@ -1,0 +1,17 @@
+# Groq Provider Configuration
+#
+# Fast inference on open-source models. OpenAI-compatible API.
+# Get your API key from https://console.groq.com/keys
+#
+# Models: llama-3.3-70b-versatile, llama-3.1-8b-instant, mixtral-8x7b-32768
+
+providers:
+  groq:
+    upstream_url: https://api.groq.com/openai
+    api_key_env: GROQ_API_KEY
+    models:
+      - llama-3.3-70b-versatile
+      - llama-3.1-8b-instant
+      - llama-3.1-70b-versatile
+      - mixtral-8x7b-32768
+      - gemma2-9b-it

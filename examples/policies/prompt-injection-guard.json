@@ -1,0 +1,45 @@
+{
+  "base_key_env": "OPENAI_API_KEY",
+  "model_regex": "^gpt",
+  "prompts": [
+    { "role": "system", "content": "You are a helpful customer support assistant. Only answer questions about our products." }
+  ],
+  "rules": [
+    {
+      "name": "ignore-instructions",
+      "type": "regex",
+      "pattern": "(?i)(ignore|forget|disregard).*(previous|above|prior|system).*(instructions|prompt|rules)",
+      "action": "fail"
+    },
+    {
+      "name": "system-prompt-extraction",
+      "type": "regex",
+      "pattern": "(?i)(what|show|tell|repeat|print).*(system|initial).*(prompt|instructions|message)",
+      "action": "fail"
+    },
+    {
+      "name": "jailbreak-keywords",
+      "type": "keyword",
+      "keywords": ["jailbreak", "DAN", "do anything now", "bypass", "override safety"],
+      "action": "fail"
+    },
+    {
+      "name": "role-play-escape",
+      "type": "regex",
+      "pattern": "(?i)(pretend|act as if|imagine|role.?play).*(no rules|no restrictions|unrestricted|unfiltered)",
+      "action": "warn"
+    },
+    {
+      "name": "code-injection",
+      "type": "regex",
+      "pattern": "(?i)(exec|eval|system|subprocess|os\\.popen|child_process)",
+      "action": "warn"
+    },
+    {
+      "name": "sql-injection",
+      "type": "regex",
+      "pattern": "(?i)(drop|delete|truncate|alter)\\s+(table|database|index)",
+      "action": "fail"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "base_key_env": "OPENAI_API_KEY",
+  "max_tokens": 100000,
+  "model_regex": "^gpt-4o",
+  "timeout": 60,
+  "rate_limit": {
+    "rules": [
+      { "requests": 30, "window": "1m" },
+      { "tokens": 50000, "window": "1h" }
+    ],
+    "max_parallel": 3
+  }
+}

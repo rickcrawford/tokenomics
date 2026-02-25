@@ -1,0 +1,48 @@
+# Multi-Provider Configuration
+#
+# Combine multiple providers in a single file. This is the typical
+# production setup -- one Tokenomics instance routes to all of them.
+# The policy on each token determines which providers and models are allowed.
+
+providers:
+
+  openai:
+    upstream_url: https://api.openai.com
+    api_key_env: OPENAI_API_KEY
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+      - o3-mini
+
+  anthropic:
+    upstream_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+    auth_scheme: header
+    auth_header: x-api-key
+    headers:
+      anthropic-version: "2023-06-01"
+    chat_path: /v1/messages
+    models:
+      - claude-opus-4-6
+      - claude-sonnet-4-6
+
+  groq:
+    upstream_url: https://api.groq.com/openai
+    api_key_env: GROQ_API_KEY
+    models:
+      - llama-3.3-70b-versatile
+      - llama-3.1-8b-instant
+
+  mistral:
+    upstream_url: https://api.mistral.ai
+    api_key_env: MISTRAL_API_KEY
+    models:
+      - mistral-large-latest
+      - mistral-small-latest
+
+  deepseek:
+    upstream_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    models:
+      - deepseek-chat
+      - deepseek-reasoner

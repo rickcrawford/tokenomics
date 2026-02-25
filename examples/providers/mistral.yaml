@@ -1,0 +1,18 @@
+# Mistral AI Provider Configuration
+#
+# OpenAI-compatible API with Bearer token auth.
+# Get your API key from https://console.mistral.ai/api-keys
+#
+# Models: mistral-large-latest, mistral-small-latest, codestral-latest
+
+providers:
+  mistral:
+    upstream_url: https://api.mistral.ai
+    api_key_env: MISTRAL_API_KEY
+    models:
+      - mistral-large-latest
+      - mistral-medium-latest
+      - mistral-small-latest
+      - open-mistral-nemo
+      - codestral-latest
+      - pixtral-large-latest

@@ -1,0 +1,22 @@
+# Azure OpenAI Provider Configuration
+#
+# Uses header-based auth with api-key header.
+# Replace {resource} with your Azure resource name.
+# The api-version header is required.
+#
+# To find your values:
+#   Azure Portal > Your OpenAI Resource > Keys and Endpoint
+
+providers:
+  azure_openai:
+    upstream_url: https://my-resource.openai.azure.com
+    api_key_env: AZURE_OPENAI_API_KEY
+    auth_scheme: header
+    auth_header: api-key
+    headers:
+      api-version: "2024-10-21"
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+      - gpt-4
+      - o1

@@ -1,0 +1,14 @@
+# DeepSeek Provider Configuration
+#
+# OpenAI-compatible API with Bearer token auth.
+# Get your API key from https://platform.deepseek.com/api_keys
+#
+# Models: deepseek-chat, deepseek-reasoner
+
+providers:
+  deepseek:
+    upstream_url: https://api.deepseek.com
+    api_key_env: DEEPSEEK_API_KEY
+    models:
+      - deepseek-chat
+      - deepseek-reasoner

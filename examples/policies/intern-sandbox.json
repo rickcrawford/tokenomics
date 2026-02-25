@@ -1,0 +1,41 @@
+{
+  "base_key_env": "OPENAI_API_KEY",
+  "model": "gpt-4o-mini",
+  "max_tokens": 10000,
+  "timeout": 30,
+  "prompts": [
+    { "role": "system", "content": "You are a helpful coding assistant. Only answer programming-related questions." }
+  ],
+  "rules": [
+    {
+      "name": "prompt-injection",
+      "type": "regex",
+      "pattern": "(?i)ignore.*instructions",
+      "action": "fail"
+    },
+    {
+      "name": "dangerous-keywords",
+      "type": "keyword",
+      "keywords": ["jailbreak", "bypass", "override"],
+      "action": "fail"
+    },
+    {
+      "name": "pii-mask",
+      "type": "pii",
+      "detect": ["ssn", "credit_card", "api_key", "aws_key"],
+      "action": "mask",
+      "scope": "both"
+    }
+  ],
+  "rate_limit": {
+    "rules": [
+      { "requests": 10, "window": "1m" },
+      { "requests": 100, "window": "24h", "strategy": "fixed" }
+    ],
+    "max_parallel": 1
+  },
+  "metadata": {
+    "team": "intern",
+    "budget_tier": "sandbox"
+  }
+}

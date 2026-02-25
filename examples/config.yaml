@@ -1,0 +1,61 @@
+# Tokenomics Configuration
+#
+# Copy this file to the project root as config.yaml and adjust for your environment.
+# All values shown are defaults unless noted otherwise.
+
+server:
+  http_port: 8080
+  https_port: 8443
+  upstream_url: https://api.openai.com   # Default upstream (overridden by provider/policy)
+
+  tls:
+    enabled: true
+    auto_gen: true       # Auto-generate a self-signed cert on startup
+    cert_dir: ./certs    # Where auto-generated certs are stored
+    # cert_file: ""      # Path to custom TLS cert (disables auto_gen)
+    # key_file: ""       # Path to custom TLS key
+
+storage:
+  db_path: ./tokenomics.db   # BoltDB file for token storage
+
+session:
+  backend: memory             # "memory" or "redis"
+  redis:
+    addr: localhost:6379
+    password: ""
+    db: 0
+
+security:
+  hash_key_env: TOKENOMICS_HASH_KEY              # Env var for HMAC token hashing
+  encryption_key_env: TOKENOMICS_ENCRYPTION_KEY   # Env var for AES-256-GCM at-rest encryption
+
+# ── Webhook Events ──────────────────────────────────────────────────────
+#
+# Fire HTTP POST requests when things happen.
+# Run the sample collector to test:
+#   go run examples/webhook-collector/main.go -secret my-webhook-secret -signing-key my-signing-key
+#
+events:
+  webhooks:
+    # Primary webhook -- gets everything
+    - url: http://localhost:9090/webhook
+      secret: my-webhook-secret          # Sent as X-Webhook-Secret header
+      signing_key: my-signing-key        # HMAC-SHA256 signature in X-Webhook-Signature
+      timeout: 10
+      # events: []                       # Empty = all events
+
+    # Alerting webhook -- only violations and budget alerts
+    # - url: https://alerts.example.com/tokenomics
+    #   secret: alerts-secret
+    #   events:
+    #     - "rule.violation"
+    #     - "budget.exceeded"
+    #     - "rate.exceeded"
+    #     - "token.expired"
+
+    # Audit webhook -- token lifecycle only
+    # - url: https://audit.example.com/tokenomics
+    #   signing_key: audit-hmac-key
+    #   events:
+    #     - "token.*"
+    #     - "server.start"

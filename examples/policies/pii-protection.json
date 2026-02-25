@@ -1,0 +1,28 @@
+{
+  "base_key_env": "OPENAI_API_KEY",
+  "model": "gpt-4o",
+  "max_tokens": 200000,
+  "rules": [
+    {
+      "name": "pii-mask-inbound",
+      "type": "pii",
+      "detect": ["ssn", "credit_card", "email", "phone", "aws_key", "api_key"],
+      "action": "mask",
+      "scope": "input"
+    },
+    {
+      "name": "pii-mask-outbound",
+      "type": "pii",
+      "detect": ["ssn", "credit_card"],
+      "action": "mask",
+      "scope": "output"
+    },
+    {
+      "name": "pii-warn-secrets",
+      "type": "pii",
+      "detect": ["private_key", "connection_string", "github_token", "jwt"],
+      "action": "warn",
+      "scope": "both"
+    }
+  ]
+}

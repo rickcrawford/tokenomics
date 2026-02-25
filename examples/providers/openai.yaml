@@ -1,0 +1,20 @@
+# OpenAI Provider Configuration
+#
+# The most common setup. Uses Bearer token auth by default.
+# Set OPENAI_API_KEY in your environment.
+#
+# Models: gpt-4o, gpt-4o-mini, gpt-4-turbo, o1, o1-mini, o3, o3-mini, o4-mini
+
+providers:
+  openai:
+    upstream_url: https://api.openai.com
+    api_key_env: OPENAI_API_KEY
+    # auth_scheme: bearer  (default, no need to set)
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+      - gpt-4-turbo
+      - o1
+      - o1-mini
+      - o3-mini
+      - o4-mini

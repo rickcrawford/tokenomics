@@ -1,0 +1,23 @@
+# Ollama Provider Configuration (Local)
+#
+# No API key required. Runs on localhost.
+# Install: https://ollama.ai
+# Pull a model: ollama pull llama3.1
+#
+# Models: whatever you've pulled locally
+
+providers:
+  ollama:
+    upstream_url: http://localhost:11434
+    api_key_env: ""
+    auth_scheme: header
+    auth_header: ""
+    chat_path: /api/chat
+    models:
+      - llama3.1
+      - llama3.2
+      - mistral
+      - codellama
+      - phi3
+      - gemma2
+      - qwen2.5
