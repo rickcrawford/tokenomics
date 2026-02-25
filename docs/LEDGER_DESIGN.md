@@ -35,7 +35,7 @@ Today, token usage lives only in-memory (`/stats` endpoint) or in stdout JSON lo
 
 ### Per-Request Entry
 
-Each proxied request captures the full context the proxy already tracks in `RequestLog` (logging.go) and `UsageStats` (stats.go). One proxy session can serve multiple tokens, so `token_hash` is on every entry.
+Each proxied request captures the full context the proxy already tracks in `RequestLog` (logging.go) and `UsageStats` (stats.go), plus metadata extracted from the provider's response headers and body. One proxy session can serve multiple tokens, so `token_hash` is on every entry.
 
 | Field | Source | Purpose |
 |-------|--------|---------|
@@ -55,6 +55,45 @@ Each proxied request captures the full context the proxy already tracks in `Requ
 | `fallback_model` | Fallback model used | When primary model failed |
 | `rule_matches` | Content rule engine | Security/compliance events (warn, log, mask actions) |
 | `metadata` | Policy tags | Team, cost_center, project labels from token policy |
+| `provider_meta` | Response headers + body | Provider-reported token details, rate limits, model served (see below) |
+
+### Provider Metadata (`provider_meta`)
+
+Normalized fields extracted from each provider's response. All fields are optional and omitted when not present. This matters for cost correlation because cached tokens and reasoning tokens are billed at different rates.
+
+| Field | Source | Purpose |
+|-------|--------|---------|
+| **Token detail** | | |
+| `cached_input_tokens` | OpenAI `prompt_tokens_details.cached_tokens`, Anthropic `cache_read_input_tokens` | Cached tokens are typically 50-90% cheaper |
+| `cache_creation_tokens` | Anthropic `cache_creation_input_tokens` | Tokens written to cache (billed at 1.25x on Anthropic) |
+| `reasoning_tokens` | OpenAI `completion_tokens_details.reasoning_tokens` | o1/o3/o4 reasoning tokens (billed separately, often higher) |
+| **Model identity** | | |
+| `actual_model` | Response body `model` field | Model actually served. May differ from requested (e.g., request `gpt-4o` but get `gpt-4o-2024-11-20`) |
+| `finish_reason` | OpenAI `choices[0].finish_reason`, Anthropic `stop_reason`, Gemini `candidates[0].finishReason` | Why generation stopped: stop, length, content_filter, tool_calls |
+| **Rate limit state** | | |
+| `rate_limit_remaining_requests` | Provider rate limit headers | Remaining requests in current window |
+| `rate_limit_remaining_tokens` | Provider rate limit headers | Remaining tokens in current window |
+| `rate_limit_reset` | Provider rate limit headers | When the current window resets (ISO 8601 or seconds) |
+
+**Provider header mappings:**
+
+| Provider | Remaining Requests | Remaining Tokens | Reset |
+|----------|-------------------|------------------|-------|
+| OpenAI | `x-ratelimit-remaining-requests` | `x-ratelimit-remaining-tokens` | `x-ratelimit-reset-requests` |
+| Anthropic | `anthropic-ratelimit-requests-remaining` | `anthropic-ratelimit-tokens-remaining` | `anthropic-ratelimit-tokens-reset` |
+| Azure | `x-ratelimit-remaining-requests` | `x-ratelimit-remaining-tokens` | `x-ratelimit-reset-tokens` |
+| Gemini | (not exposed per-request) | (not exposed per-request) | `retry-after` (on 429 only) |
+| Mistral | (same as OpenAI pattern) | (same as OpenAI pattern) | (same as OpenAI pattern) |
+
+**Token detail extraction by provider:**
+
+| Provider | Cached Input | Cache Write | Reasoning |
+|----------|-------------|-------------|-----------|
+| OpenAI | `usage.prompt_tokens_details.cached_tokens` | n/a | `usage.completion_tokens_details.reasoning_tokens` |
+| Anthropic | `usage.cache_read_input_tokens` | `usage.cache_creation_input_tokens` | n/a |
+| Gemini | `usageMetadata.cachedContentTokenCount` | n/a | n/a |
+| Azure | Same as OpenAI | Same as OpenAI | Same as OpenAI |
+| Mistral | n/a | n/a | n/a |
 
 ### Session Summary (`sessions/<date>_<id>.json`)
 
@@ -75,6 +114,9 @@ Each proxied request captures the full context the proxy already tracks in `Requ
     "input_tokens": 125000,
     "output_tokens": 89000,
     "total_tokens": 214000,
+    "cached_input_tokens": 40000,
+    "cache_creation_tokens": 5000,
+    "reasoning_tokens": 12000,
     "error_count": 2,
     "retry_count": 3,
     "rule_violation_count": 1,
@@ -85,13 +127,16 @@ Each proxied request captures the full context the proxy already tracks in `Requ
       "request_count": 30,
       "input_tokens": 80000,
       "output_tokens": 60000,
-      "total_tokens": 140000
+      "total_tokens": 140000,
+      "cached_input_tokens": 40000,
+      "cache_creation_tokens": 5000
     },
     "gpt-4o": {
       "request_count": 15,
       "input_tokens": 45000,
       "output_tokens": 29000,
-      "total_tokens": 74000
+      "total_tokens": 74000,
+      "reasoning_tokens": 12000
     }
   },
   "by_provider": {
@@ -99,13 +144,16 @@ Each proxied request captures the full context the proxy already tracks in `Requ
       "request_count": 30,
       "input_tokens": 80000,
       "output_tokens": 60000,
-      "total_tokens": 140000
+      "total_tokens": 140000,
+      "cached_input_tokens": 40000,
+      "cache_creation_tokens": 5000
     },
     "OPENAI_API_KEY": {
       "request_count": 15,
       "input_tokens": 45000,
       "output_tokens": 29000,
-      "total_tokens": 74000
+      "total_tokens": 74000,
+      "reasoning_tokens": 12000
     }
   },
   "by_token": {
@@ -140,7 +188,15 @@ Each proxied request captures the full context the proxy already tracks in `Requ
       "status_code": 200,
       "stream": true,
       "upstream_id": "msg_abc123",
-      "upstream_request_id": "req_def456"
+      "upstream_request_id": "req_def456",
+      "provider_meta": {
+        "actual_model": "claude-sonnet-4-20250514",
+        "finish_reason": "end_turn",
+        "cached_input_tokens": 1200,
+        "cache_creation_tokens": 0,
+        "rate_limit_remaining_requests": 95,
+        "rate_limit_remaining_tokens": 78000
+      }
     },
     {
       "timestamp": "2026-02-25T10:35:12Z",
@@ -156,7 +212,14 @@ Each proxied request captures the full context the proxy already tracks in `Requ
       "retry_count": 1,
       "fallback_model": "gpt-4o",
       "rule_matches": [{"action": "warn", "message": "keyword match: TODO"}],
-      "metadata": {"team": "platform"}
+      "metadata": {"team": "platform"},
+      "provider_meta": {
+        "actual_model": "gpt-4o-2024-11-20",
+        "finish_reason": "stop",
+        "reasoning_tokens": 450,
+        "rate_limit_remaining_requests": 58,
+        "rate_limit_remaining_tokens": 42000
+      }
     }
   ]
 }
@@ -166,6 +229,12 @@ Each proxied request captures the full context the proxy already tracks in `Requ
 
 - `token_hash` on every request. One proxy session serves multiple tokens. This enables per-token rollups and multi-token attribution.
 - `provider` (`base_key_env`) on every request. Different providers have different pricing. Downstream analytics needs this to join with cost tables.
+- `provider_meta` captures what the provider actually reports back. This is the provider's truth, not our estimate. Key fields:
+  - `cached_input_tokens` / `cache_creation_tokens` / `reasoning_tokens`: different pricing tiers. Cached tokens are 50-90% cheaper. Reasoning tokens (o1/o3/o4) can be 3-4x more expensive. Without these, cost correlation is inaccurate.
+  - `actual_model`: providers may serve a different model version than requested. If you ask for `gpt-4o` you might get `gpt-4o-2024-11-20`. The actual model determines the billing rate.
+  - `finish_reason`: tells you if generation was cut short by token limits, content filters, or natural completion. Useful for debugging truncated responses.
+  - `rate_limit_remaining_*`: the provider's remaining capacity after each request. Useful for capacity planning and understanding throttling patterns.
+- `cached_input_tokens`, `cache_creation_tokens`, and `reasoning_tokens` are rolled up into `totals`, `by_model`, and `by_provider` so downstream analytics can compute accurate costs without scanning individual requests.
 - `by_model`, `by_provider`, and `by_token` rollups are computed at `Close()` time. Three dimensions to slice: what model, which provider API key, which wrapper token.
 - `by_token` includes `models_used` and time range per token, mirroring what `UsageStats.SessionEntry` already tracks in memory.
 - `retry_count` and `fallback_model` expose wasted work. Retries burn tokens on attempts that failed.
@@ -175,7 +244,7 @@ Each proxied request captures the full context the proxy already tracks in `Requ
 - `metadata` from the token's policy flows through to each request, enabling team/project/cost-center attribution.
 - `totals` includes `retry_count`, `rule_violation_count`, `rate_limit_count` as session-level signals for operational health.
 - `git.commit_start` is HEAD when the proxy starts. `git.commit_end` is HEAD when it stops. This brackets what code was being worked on.
-- No pricing or cost fields. Downstream analytics can join `provider + model + token counts` with current pricing at query time.
+- No pricing or cost fields. The raw token detail (cached, reasoning, standard) gives downstream analytics everything it needs to apply current rates.
 
 ### Session Memory (`memory/<date>_<id>.md`)
 
@@ -310,11 +379,61 @@ if h.ledger != nil {
         FallbackModel:      logEntry.FallbackModel,
         RuleMatches:        logEntry.RuleMatches,
         Metadata:           resolved.Metadata,
+        ProviderMeta:       extractProviderMeta(resp.Header, respBody),
     })
 }
 ```
 
-The `RequestEntry` struct mirrors `RequestLog` from logging.go. We capture the same data the structured logs already emit, but persist it to disk.
+The `RequestEntry` struct mirrors `RequestLog` from logging.go. We capture the same data the structured logs already emit, plus provider metadata, and persist it to disk.
+
+**New helper: `extractProviderMeta()`**
+
+Extracts normalized metadata from the provider's response headers and body. Added to `internal/proxy/` alongside the existing `extractUpstreamRequestID()` and `extractUpstreamID()` helpers.
+
+```go
+// ProviderMeta holds normalized metadata from the provider's response.
+type ProviderMeta struct {
+    // Token detail (from response body usage object)
+    CachedInputTokens  int    `json:"cached_input_tokens,omitempty"`
+    CacheCreationTokens int   `json:"cache_creation_tokens,omitempty"`
+    ReasoningTokens    int    `json:"reasoning_tokens,omitempty"`
+
+    // Model identity (from response body)
+    ActualModel        string `json:"actual_model,omitempty"`
+    FinishReason       string `json:"finish_reason,omitempty"`
+
+    // Rate limit state (from response headers)
+    RateLimitRemainingRequests int    `json:"rate_limit_remaining_requests,omitempty"`
+    RateLimitRemainingTokens   int    `json:"rate_limit_remaining_tokens,omitempty"`
+    RateLimitReset             string `json:"rate_limit_reset,omitempty"`
+}
+
+func extractProviderMeta(headers http.Header, body []byte) *ProviderMeta {
+    meta := &ProviderMeta{}
+
+    // Rate limit headers (normalized across providers)
+    meta.RateLimitRemainingRequests = parseIntHeader(headers,
+        "x-ratelimit-remaining-requests",              // OpenAI, Azure
+        "anthropic-ratelimit-requests-remaining",       // Anthropic
+    )
+    meta.RateLimitRemainingTokens = parseIntHeader(headers,
+        "x-ratelimit-remaining-tokens",                // OpenAI, Azure
+        "anthropic-ratelimit-tokens-remaining",         // Anthropic
+    )
+    meta.RateLimitReset = firstHeader(headers,
+        "x-ratelimit-reset-requests",                  // OpenAI
+        "anthropic-ratelimit-tokens-reset",             // Anthropic
+        "x-ratelimit-reset-tokens",                    // Azure
+    )
+
+    // Body fields (actual_model, finish_reason, token details)
+    // Parsed from response JSON...
+
+    return meta
+}
+```
+
+For streaming responses, `actual_model`, `finish_reason`, and usage details are extracted from SSE chunks (the final chunk often contains the `usage` object). The existing `handleStreamingResponse` already parses chunks for token counting and will be extended to capture these fields.
 
 For memory recording, when the existing memory writer fires, also write to the ledger's memory writer if enabled:
 
@@ -450,7 +569,9 @@ TOTAL                  199       695,000        438,000     1,133,000
 | `internal/ledger/ledger_test.go` | New | Unit tests for ledger package |
 | `internal/config/config.go` | Modify | Add `LedgerConfig` struct and field |
 | `internal/proxy/handler.go` | Modify | Add `ledger` field, `SetLedger()` method |
-| `internal/proxy/handler_chat.go` | Modify | Call `ledger.RecordRequest()` and `RecordMemory()` |
+| `internal/proxy/handler_chat.go` | Modify | Call `ledger.RecordRequest()` and `RecordMemory()`, extract provider metadata |
+| `internal/proxy/provider_meta.go` | New | `extractProviderMeta()`, `ProviderMeta` struct, header/body parsing helpers |
+| `internal/proxy/provider_meta_test.go` | New | Tests for provider metadata extraction across OpenAI, Anthropic, Gemini, Azure |
 | `cmd/serve.go` | Modify | Initialize ledger on startup, defer Close |
 | `cmd/ledger.go` | New | CLI commands: summary, sessions, show, init |
 | `cmd/ledger_test.go` | New | CLI command tests |
