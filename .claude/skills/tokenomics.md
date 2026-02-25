@@ -144,6 +144,33 @@ Actions: `fail` (block 403), `warn` (allow + log), `log` (silent), `mask` (redac
 Scopes: `input` (default), `output`, `both`
 PII types: `ssn`, `credit_card`, `email`, `phone`, `ip_address`, `aws_key`, `api_key`, `jwt`, `private_key`, `connection_string`, `github_token`
 
+### Memory (Session Logging)
+
+Log conversations to a file or Redis for audit trails and debugging.
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "file_path": "./memory/sessions.md"
+  }
+}
+```
+
+File entries are markdown formatted:
+
+```
+## <timestamp> | <token_hash_prefix> | <role> | <model>
+
+<content>
+
+---
+```
+
+For Redis-based memory, use `"redis": true` instead of `file_path`. Entries are pushed to `tokenomics:memory:<session_id>`.
+
+See `examples/memory-sample.md` for a full sample output file.
+
 ### Policy Templates
 
 Point users to examples for starting points:
@@ -152,6 +179,7 @@ Point users to examples for starting points:
 - `examples/policies/pii-protection.json` - PII detection and masking
 - `examples/policies/prompt-injection-guard.json` - content safety
 - `examples/policies/multi-provider-routing.json` - multi-provider with retry
+- `examples/policies/memory-enabled.json` - session memory logging
 - `examples/policies/intern-sandbox.json` - locked-down sandbox
 
 ## Interactive Token Creation
@@ -163,7 +191,8 @@ When the user says "create a token" without providing a full policy, ask about:
 4. Rate limits (requests/min, tokens/hour, parallel)
 5. Content rules (PII masking, blocked patterns, keywords)
 6. System prompts to inject
-7. Expiration duration
+7. Session memory (file path or Redis)
+8. Expiration duration
 
 Then assemble the policy JSON, show it for confirmation, and run the create command.
 

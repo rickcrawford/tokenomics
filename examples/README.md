@@ -26,6 +26,7 @@ make build
 examples/
 ├── config.yaml                  # Full annotated config with webhook setup
 ├── .env.example                 # Every env var Tokenomics might need
+├── memory-sample.md             # What session memory files look like
 ├── webhook-collector/           # Sample server to receive and debug events
 │   └── main.go
 ├── providers/                   # Per-provider YAML configs
@@ -44,6 +45,7 @@ examples/
     ├── pii-protection.json      # PII detection and masking
     ├── prompt-injection-guard.json  # Content rules for prompt safety
     ├── multi-provider-routing.json  # Multi-provider with retry and fallback
+    ├── memory-enabled.json      # Session memory logging to file
     └── intern-sandbox.json      # Locked-down sandbox for untrusted users
 ```
 
@@ -182,6 +184,9 @@ Copy a policy JSON and use it with `token create`:
 # Multi-provider routing with retry
 ./bin/tokenomics token create --policy "$(cat examples/policies/multi-provider-routing.json)" --expires 1y
 
+# Session memory logging with PII masking
+./bin/tokenomics token create --policy "$(cat examples/policies/memory-enabled.json)"
+
 # Locked-down intern sandbox with 10k token budget
 ./bin/tokenomics token create --policy "$(cat examples/policies/intern-sandbox.json)" --expires 7d
 ```
@@ -195,6 +200,7 @@ Copy a policy JSON and use it with `token create`:
 | `pii-protection` | gpt-4o | 200k | None | PII mask (6 types) | No |
 | `prompt-injection-guard` | gpt-* | None | None | 6 rules (fail+warn) | No |
 | `multi-provider-routing` | All | 500k | 60/min, 200k tok/hr | PII mask | 2 retries + fallback |
+| `memory-enabled` | gpt-4o* | 200k | 30/min | PII mask | No |
 | `intern-sandbox` | gpt-4o-mini only | 10k | 10/min, 100/day | 3 rules + PII mask | No |
 
 ## Environment Variables
