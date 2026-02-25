@@ -19,9 +19,9 @@ type mockTokenStore struct {
 	tokens map[string]*policy.Policy
 }
 
-func (m *mockTokenStore) Init() error                        { return nil }
-func (m *mockTokenStore) Close() error                       { return nil }
-func (m *mockTokenStore) Reload() error                      { return nil }
+func (m *mockTokenStore) Init() error   { return nil }
+func (m *mockTokenStore) Close() error  { return nil }
+func (m *mockTokenStore) Reload() error { return nil }
 func (m *mockTokenStore) Create(hash string, polJSON string, expiresAt string) error {
 	p, err := policy.Parse(polJSON)
 	if err != nil {
@@ -30,10 +30,10 @@ func (m *mockTokenStore) Create(hash string, polJSON string, expiresAt string) e
 	m.tokens[hash] = p
 	return nil
 }
-func (m *mockTokenStore) Get(hash string) (*store.TokenRecord, error) { return nil, nil }
+func (m *mockTokenStore) Get(hash string) (*store.TokenRecord, error)                { return nil, nil }
 func (m *mockTokenStore) Update(hash string, polJSON string, expiresAt string) error { return nil }
-func (m *mockTokenStore) Delete(hash string) error              { delete(m.tokens, hash); return nil }
-func (m *mockTokenStore) List() ([]store.TokenRecord, error)    { return nil, nil }
+func (m *mockTokenStore) Delete(hash string) error                                   { delete(m.tokens, hash); return nil }
+func (m *mockTokenStore) List() ([]store.TokenRecord, error)                         { return nil, nil }
 func (m *mockTokenStore) Lookup(hash string) (*policy.Policy, error) {
 	return m.tokens[hash], nil
 }
@@ -76,7 +76,7 @@ func TestHandler_BearerAuth(t *testing.T) {
 
 	pol := &policy.Policy{BaseKeyEnv: "TEST_API_KEY"}
 	pol.Validate()
-	ts.Save(hashForTest(handler,"tkn_test"), pol)
+	ts.Save(hashForTest(handler, "tkn_test"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Authorization", "Bearer tkn_test")
@@ -128,7 +128,7 @@ func TestHandler_HeaderAuth(t *testing.T) {
 		},
 	}
 	pol.Validate()
-	ts.Save(hashForTest(handler,"tkn_ant"), pol)
+	ts.Save(hashForTest(handler, "tkn_ant"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"claude-3-opus","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Authorization", "Bearer tkn_ant")
@@ -179,7 +179,7 @@ func TestHandler_QueryAuth(t *testing.T) {
 		},
 	}
 	pol.Validate()
-	ts.Save(hashForTest(handler,"tkn_gem"), pol)
+	ts.Save(hashForTest(handler, "tkn_gem"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gemini-pro","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Authorization", "Bearer tkn_gem")
@@ -227,7 +227,7 @@ func TestHandler_ChatPathOverride(t *testing.T) {
 		},
 	}
 	pol.Validate()
-	ts.Save(hashForTest(handler,"tkn_co"), pol)
+	ts.Save(hashForTest(handler, "tkn_co"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"command-r","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Authorization", "Bearer tkn_co")
@@ -274,7 +274,7 @@ func TestHandler_ProviderAPIKeyEnvFallback(t *testing.T) {
 		},
 	}
 	pol.Validate()
-	ts.Save(hashForTest(handler,"tkn_groq"), pol)
+	ts.Save(hashForTest(handler, "tkn_groq"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"llama-3-70b","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Authorization", "Bearer tkn_groq")
@@ -354,7 +354,7 @@ func TestHandler_MultiProviderHeaders(t *testing.T) {
 		},
 	}
 	pol.Validate()
-	ts.Save(hashForTest(handler,"tkn_custom"), pol)
+	ts.Save(hashForTest(handler, "tkn_custom"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Authorization", "Bearer tkn_custom")
@@ -420,7 +420,7 @@ func TestHandler_Passthrough(t *testing.T) {
 
 	pol := &policy.Policy{BaseKeyEnv: "TEST_KEY"}
 	pol.Validate()
-	ts.Save(hashForTest(handler,"tkn_pass"), pol)
+	ts.Save(hashForTest(handler, "tkn_pass"), pol)
 
 	req := httptest.NewRequest("GET", "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer tkn_pass")

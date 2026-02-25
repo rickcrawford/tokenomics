@@ -31,10 +31,10 @@ type LoggingConfig struct {
 
 // RemoteConfig configures loading tokens and config from a central server.
 type RemoteConfig struct {
-	URL      string `mapstructure:"url"`       // Central server URL (e.g. http://config-server:9090)
-	APIKey   string `mapstructure:"api_key"`   // Shared API key for authentication
-	SyncSec  int    `mapstructure:"sync"`      // Sync interval in seconds (0 = startup only)
-	Insecure bool   `mapstructure:"insecure"`  // Skip TLS verification
+	URL      string `mapstructure:"url"`      // Central server URL (e.g. http://config-server:9090)
+	APIKey   string `mapstructure:"api_key"`  // Shared API key for authentication
+	SyncSec  int    `mapstructure:"sync"`     // Sync interval in seconds (0 = startup only)
+	Insecure bool   `mapstructure:"insecure"` // Skip TLS verification
 }
 
 // EventsConfig holds webhook and future event emitter configuration.
@@ -46,9 +46,9 @@ type EventsConfig struct {
 type WebhookEndpoint struct {
 	URL        string   `mapstructure:"url"`
 	Secret     string   `mapstructure:"secret"`      // Shared secret sent as X-Webhook-Secret
-	SigningKey  string   `mapstructure:"signing_key"`  // HMAC-SHA256 signing key for X-Webhook-Signature
-	Events     []string `mapstructure:"events"`       // Event type filter (supports trailing * wildcard); empty = all
-	TimeoutSec int      `mapstructure:"timeout"`      // HTTP timeout in seconds (default 10)
+	SigningKey string   `mapstructure:"signing_key"` // HMAC-SHA256 signing key for X-Webhook-Signature
+	Events     []string `mapstructure:"events"`      // Event type filter (supports trailing * wildcard); empty = all
+	TimeoutSec int      `mapstructure:"timeout"`     // HTTP timeout in seconds (default 10)
 }
 
 // ProviderConfig defines a known upstream AI provider.

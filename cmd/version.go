@@ -15,8 +15,8 @@ var (
 )
 
 var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Print the version and build information",
+	Use:     "version",
+	Short:   "Print the version and build information",
 	Example: `  tokenomics version`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("tokenomics %s\n", Version)

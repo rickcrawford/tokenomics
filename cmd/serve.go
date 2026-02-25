@@ -272,7 +272,7 @@ func buildEmitter(cfg config.EventsConfig) events.Emitter {
 		emitters = append(emitters, events.NewWebhookEmitter(events.WebhookConfig{
 			URL:        wh.URL,
 			Secret:     wh.Secret,
-			SigningKey:  wh.SigningKey,
+			SigningKey: wh.SigningKey,
 			Events:     wh.Events,
 			TimeoutSec: wh.TimeoutSec,
 		}))

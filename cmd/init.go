@@ -1,31 +1,14 @@
 package cmd
 
 import (
-	"crypto/tls"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
-	"os/exec"
-	"os/user"
-	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
 	"github.com/spf13/cobra"
 )
-
-// daemonConfig holds settings for starting the proxy as a background process.
-type daemonConfig struct {
-	host     string
-	port     int
-	tls      bool
-	insecure bool
-	pidFile  string
-	logFile  string
-}
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -89,12 +72,6 @@ func init() {
 	initCmd.Flags().StringVar(&initAgent, "agent", "", "write hook config for an agent (claude-code)")
 
 	rootCmd.AddCommand(initCmd)
-}
-
-// EnvPair represents a key-value pair for environment variable output.
-type EnvPair struct {
-	Key   string
-	Value string
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -215,8 +192,6 @@ func envPairsFromProviderConfig(name string, pc config.ProviderConfig, token, ba
 	// API key env var
 	keyEnv := pc.APIKeyEnv
 	if keyEnv == "" {
-		// Some providers (like ollama) don't need a key, but we still set the
-		// base URL so tools that support it can find the proxy.
 		keyEnv = strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
 	}
 	pairs = append(pairs, EnvPair{keyEnv, token})
@@ -279,111 +254,6 @@ func resolveAllProviderPairs(cfg *config.Config, token, baseURL string) []EnvPai
 	return pairs
 }
 
-// startDaemon launches the proxy as a background process and waits for it to
-// become ready. It is used by both the init and start commands.
-func startDaemon(baseURL string, dc daemonConfig) error {
-	// Resolve PID and log file paths
-	pidFile := dc.pidFile
-	logFile := dc.logFile
-	if pidFile == "" || logFile == "" {
-		u, err := user.Current()
-		if err != nil {
-			return fmt.Errorf("get current user: %w", err)
-		}
-		tokenomicsDir := filepath.Join(u.HomeDir, ".tokenomics")
-		if pidFile == "" {
-			pidFile = filepath.Join(tokenomicsDir, "tokenomics.pid")
-		}
-		if logFile == "" {
-			logFile = filepath.Join(tokenomicsDir, "tokenomics.log")
-		}
-	}
-
-	// Ensure tokenomics directory exists
-	pidDir := filepath.Dir(pidFile)
-	if err := os.MkdirAll(pidDir, 0o700); err != nil {
-		return fmt.Errorf("create tokenomics dir: %w", err)
-	}
-
-	// Check if already running
-	if existingPid, err := readPIDFile(pidFile); err == nil {
-		if processAlive(existingPid) {
-			// Proxy already running, skip launch
-			return nil
-		}
-	}
-
-	// Open log file for proxy output
-	logFd, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return fmt.Errorf("open log file: %w", err)
-	}
-	defer logFd.Close()
-
-	// Launch tokenomics serve as a detached process
-	serveCmd := exec.Command(os.Args[0], "serve", "--config", cfgFile, "--db", dbPath)
-	serveCmd.Stdout = logFd
-	serveCmd.Stderr = logFd
-	detachProcess(serveCmd)
-
-	if err := serveCmd.Start(); err != nil {
-		return fmt.Errorf("start proxy: %w", err)
-	}
-
-	// Write PID to file
-	if err := writePIDFile(pidFile, serveCmd.Process.Pid); err != nil {
-		return fmt.Errorf("write PID file: %w", err)
-	}
-
-	// Poll health endpoint for readiness
-	scheme := "https"
-	if !dc.tls {
-		scheme = "http"
-	}
-	healthURL := fmt.Sprintf("%s://%s:%d/ping", scheme, dc.host, dc.port)
-
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-	if dc.insecure {
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-	}
-
-	// Poll for readiness (30 attempts, ~3 seconds)
-	for i := 0; i < 30; i++ {
-		resp, err := client.Get(healthURL)
-		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
-			return nil
-		}
-		if resp != nil {
-			resp.Body.Close()
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	return fmt.Errorf("proxy failed to start within 3 seconds")
-}
-
-func readPIDFile(path string) (int, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	var pid int
-	_, err = fmt.Sscanf(string(data), "%d", &pid)
-	if err != nil {
-		return 0, err
-	}
-	return pid, nil
-}
-
-func writePIDFile(path string, pid int) error {
-	return os.WriteFile(path, []byte(fmt.Sprintf("%d", pid)), 0o644)
-}
-
 // ResolveEnvPairs determines the environment variable pairs for the given CLI target.
 // This is the legacy resolution path using hardcoded provider mappings. New code
 // should use resolveEnvPairsWithConfig which reads from providers.yaml.
@@ -417,137 +287,4 @@ func ResolveEnvPairs(cli, token, baseURL, envKey, envBase string) []EnvPair {
 			{"OPENAI_BASE_URL", baseURL + "/v1"},
 		}
 	}
-}
-
-// OutputShell writes export statements to the given writer.
-func OutputShell(pairs []EnvPair, w *os.File) error {
-	for _, p := range pairs {
-		fmt.Fprintf(w, "export %s=%q\n", p.Key, p.Value)
-	}
-	return nil
-}
-
-// OutputDotenv writes or updates a .env file at the given path.
-func OutputDotenv(pairs []EnvPair, path string) error {
-	if path == "" {
-		path = ".env"
-	}
-
-	// Read existing content if file exists
-	existing := ""
-	if data, err := os.ReadFile(path); err == nil {
-		existing = string(data)
-	}
-
-	lines := strings.Split(existing, "\n")
-	setKeys := make(map[string]bool)
-
-	// Update existing lines
-	for i, line := range lines {
-		for _, p := range pairs {
-			if strings.HasPrefix(line, p.Key+"=") {
-				lines[i] = fmt.Sprintf("%s=%q", p.Key, p.Value)
-				setKeys[p.Key] = true
-			}
-		}
-	}
-
-	// Append new keys
-	for _, p := range pairs {
-		if !setKeys[p.Key] {
-			lines = append(lines, fmt.Sprintf("%s=%q", p.Key, p.Value))
-		}
-	}
-
-	content := strings.Join(lines, "\n")
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write dotenv: %w", err)
-	}
-
-	fmt.Fprintf(os.Stderr, "Updated %s\n", path)
-	return nil
-}
-
-// OutputJSON writes environment pairs as JSON to the given writer.
-func OutputJSON(pairs []EnvPair, w *os.File) error {
-	m := make(map[string]string)
-	for _, p := range pairs {
-		m[p.Key] = p.Value
-	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(m)
-}
-
-// writeAgentConfig writes configuration files for a specific agent framework.
-func writeAgentConfig(agent string, pairs []EnvPair, proxyURL string) error {
-	switch strings.ToLower(agent) {
-	case "claude-code":
-		return writeClaudeCodeConfig(pairs, proxyURL)
-	default:
-		return fmt.Errorf("unknown agent: %s (supported: claude-code)", agent)
-	}
-}
-
-// writeClaudeCodeConfig writes hooks into .claude/settings.local.json.
-// The hook starts the proxy at session start. Environment variables must be set
-// separately via TOKENOMICS_PROXY_URL or shell profile.
-func writeClaudeCodeConfig(pairs []EnvPair, proxyURL string) error {
-	settingsDir := ".claude"
-	settingsPath := filepath.Join(settingsDir, "settings.local.json")
-
-	// Ensure .claude directory exists
-	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
-		return fmt.Errorf("create %s directory: %w", settingsDir, err)
-	}
-
-	// Load existing settings to merge
-	settings := make(map[string]interface{})
-	if data, err := os.ReadFile(settingsPath); err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			// File exists but isn't valid JSON, start fresh
-			settings = make(map[string]interface{})
-		}
-	}
-
-	// Build env map from pairs
-	envMap := make(map[string]string)
-	for _, p := range pairs {
-		envMap[p.Key] = p.Value
-	}
-
-	// Set env vars in settings
-	settings["env"] = envMap
-
-	// Write the updated settings
-	out, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal settings: %w", err)
-	}
-	out = append(out, '\n')
-
-	if err := os.WriteFile(settingsPath, out, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", settingsPath, err)
-	}
-
-	// Print result and instructions
-	fmt.Fprintf(os.Stderr, "Wrote %s\n\n", settingsPath)
-
-	fmt.Fprintf(os.Stderr, "Environment variables configured:\n")
-	for _, p := range pairs {
-		fmt.Fprintf(os.Stderr, "  %s=%s\n", p.Key, p.Value)
-	}
-
-	fmt.Fprintf(os.Stderr, "\nThe proxy must be running for these settings to work.\n")
-	fmt.Fprintf(os.Stderr, "Start it with:\n")
-	fmt.Fprintf(os.Stderr, "  tokenomics start\n\n")
-	fmt.Fprintf(os.Stderr, "Or set TOKENOMICS_PROXY_URL in your shell profile so the proxy\n")
-	fmt.Fprintf(os.Stderr, "address is available across sessions:\n")
-	fmt.Fprintf(os.Stderr, "  export TOKENOMICS_PROXY_URL=%s\n", proxyURL)
-
-	return nil
 }

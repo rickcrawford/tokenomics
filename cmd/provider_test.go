@@ -75,9 +75,9 @@ func TestBuildProviderStatuses_KeySet(t *testing.T) {
 
 func TestSortedKeys(t *testing.T) {
 	m := map[string]config.ProviderConfig{
-		"zebra":    {},
-		"alpha":    {},
-		"middle":   {},
+		"zebra":  {},
+		"alpha":  {},
+		"middle": {},
 	}
 
 	keys := sortedKeys(m)

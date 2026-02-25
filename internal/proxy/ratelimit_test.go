@@ -124,8 +124,8 @@ func TestRateLimiter_MultipleRules(t *testing.T) {
 	rl := NewRateLimiter()
 	cfg := &policy.RateLimitConfig{
 		Rules: []policy.RateLimitRule{
-			{Requests: 10, Window: "1m"},  // lenient per-minute
-			{Requests: 2, Window: "1s"},   // strict per-second
+			{Requests: 10, Window: "1m"}, // lenient per-minute
+			{Requests: 2, Window: "1s"},  // strict per-second
 		},
 	}
 
