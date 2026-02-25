@@ -69,6 +69,11 @@ remote:
   api_key: ""                # Shared API key for authentication
   sync: 0                    # Sync interval in seconds (0 = startup only)
   insecure: false            # Skip TLS verification
+  webhook:
+    enabled: false           # Enable inbound webhook endpoint for push-based sync
+    path: "/v1/webhook"      # URL path for the receiver endpoint
+    secret: ""               # Expected X-Webhook-Secret header value
+    signing_key: ""          # HMAC-SHA256 key for X-Webhook-Signature verification
 
 cli_maps:                    # Map CLI names to providers for `tokenomics run`
   claude: anthropic          # `tokenomics run claude ...` uses anthropic provider
@@ -112,6 +117,10 @@ cli_maps:                    # Map CLI names to providers for `tokenomics run`
 | `remote.api_key` | (empty) | API key for authenticating with the remote server. |
 | `remote.sync` | `0` | Sync interval in seconds. `0` means sync at startup only. |
 | `remote.insecure` | `false` | Skip TLS certificate verification for the remote server. |
+| `remote.webhook.enabled` | `false` | Enable a webhook receiver endpoint on the proxy for push-based token sync. |
+| `remote.webhook.path` | `/v1/webhook` | URL path for the inbound webhook endpoint. |
+| `remote.webhook.secret` | (empty) | Expected value of the `X-Webhook-Secret` header on inbound webhooks. |
+| `remote.webhook.signing_key` | (empty) | HMAC-SHA256 key for verifying `X-Webhook-Signature` on inbound webhooks. |
 | `cli_maps` | (see below) | Maps CLI names to providers for auto-detection in `tokenomics run`. Example: `claude: anthropic` means `tokenomics run claude` uses the anthropic provider. |
 
 ## Logging

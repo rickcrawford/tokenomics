@@ -31,10 +31,21 @@ type LoggingConfig struct {
 
 // RemoteConfig configures loading tokens and config from a central server.
 type RemoteConfig struct {
-	URL      string `mapstructure:"url"`      // Central server URL (e.g. http://config-server:9090)
-	APIKey   string `mapstructure:"api_key"`  // Shared API key for authentication
-	SyncSec  int    `mapstructure:"sync"`     // Sync interval in seconds (0 = startup only)
-	Insecure bool   `mapstructure:"insecure"` // Skip TLS verification
+	URL      string          `mapstructure:"url"`      // Central server URL (e.g. http://config-server:9090)
+	APIKey   string          `mapstructure:"api_key"`  // Shared API key for authentication
+	SyncSec  int             `mapstructure:"sync"`     // Sync interval in seconds (0 = startup only)
+	Insecure bool            `mapstructure:"insecure"` // Skip TLS verification
+	Webhook  WebhookReceiver `mapstructure:"webhook"`  // Inbound webhook for push-based sync
+}
+
+// WebhookReceiver configures the inbound webhook endpoint on the proxy.
+// The central config server pushes token lifecycle events here to trigger
+// immediate sync instead of waiting for the poll interval.
+type WebhookReceiver struct {
+	Enabled    bool   `mapstructure:"enabled"`     // Enable the webhook receiver endpoint
+	Path       string `mapstructure:"path"`        // URL path (default: /v1/webhook)
+	Secret     string `mapstructure:"secret"`      // Expected X-Webhook-Secret header value
+	SigningKey string `mapstructure:"signing_key"` // HMAC-SHA256 key for X-Webhook-Signature verification
 }
 
 // EventsConfig holds webhook and future event emitter configuration.

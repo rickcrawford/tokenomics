@@ -46,8 +46,13 @@ logging:
 # remote:
 #   url: http://config-server:9090
 #   api_key: my-remote-key
-#   sync: 60                 # Re-sync every 60 seconds (0 = startup only)
+#   sync: 300                # Fallback poll every 5 min (0 = startup only)
 #   insecure: false          # Skip TLS verification
+#   webhook:                 # Accept push events from central server
+#     enabled: true
+#     path: /v1/webhook      # Endpoint path (default)
+#     secret: my-webhook-secret      # Must match central server's outbound secret
+#     signing_key: my-signing-key    # Must match central server's outbound signing key
 
 # ── Webhook Events ──────────────────────────────────────────────────────
 #

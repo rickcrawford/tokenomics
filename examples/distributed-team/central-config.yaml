@@ -5,6 +5,9 @@
 #
 # Token CRUD commands (token create, list, update, delete) run against this database.
 # Proxy instances sync tokens from this server via the REST API.
+#
+# When tokens are created/updated/deleted, the outbound webhooks below push
+# events to each proxy instance, triggering immediate sync.
 
 storage:
   db_path: ./tokenomics.db
@@ -17,3 +20,18 @@ logging:
   level: info
   format: json
   hide_token_hash: false
+
+# Push token changes to proxy instances via webhook.
+# Add one entry per proxy instance.
+events:
+  webhooks:
+    - url: https://proxy.internal:8443/v1/webhook
+      secret: change-me-webhook-secret
+      signing_key: change-me-signing-key
+      events: ["token.*"]
+      timeout: 10
+    # Add more proxy instances as needed:
+    # - url: https://proxy-eu.internal:8443/v1/webhook
+    #   secret: change-me-webhook-secret
+    #   signing_key: change-me-signing-key
+    #   events: ["token.*"]

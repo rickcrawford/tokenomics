@@ -10,15 +10,18 @@ Run a central Tokenomics proxy for a team with role-based token policies, multi-
                     │   ./tokenomics remote             │
                     │   - Token database (BoltDB)       │
                     │   - Serves tokens via REST API    │
-                    └──────────────┬───────────────────┘
-                                   │ token sync
-                    ┌──────────────┴───────────────────┐
+                    │   - Pushes token events via       │
+                    │     webhook to proxy instances    │
+                    └──────────┬──────────┬────────────┘
+                     REST sync │          │ webhook push
+                    ┌──────────┴──────────┴────────────┐
                     │   Proxy Server (:8443 / :8080)    │
                     │   ./tokenomics serve              │
-                    │   - Syncs tokens from central     │
+                    │   - Webhook receiver for instant  │
+                    │     token sync on push events     │
+                    │   - Poll fallback every 5 min     │
                     │   - Routes to providers           │
                     │   - Enforces policies per token   │
-                    │   - Emits events to webhooks      │
                     └──────────────┬───────────────────┘
                                    │
               ┌────────────────────┼────────────────────┐
@@ -30,6 +33,8 @@ Run a central Tokenomics proxy for a team with role-based token policies, multi-
 ```
 
 Team members connect to the proxy with their assigned tokens. Each token carries its own policy (budget, model access, rate limits, content rules).
+
+Token changes propagate instantly via webhook push. When you create, update, or delete a token on the central server, it sends a `token.*` event to each proxy's webhook receiver, triggering an immediate sync.
 
 ## Files
 
@@ -159,15 +164,46 @@ All token management happens on the machine running the central config server.
   --policy '{"max_tokens": 100000}'
 ```
 
-Changes propagate to proxy instances on the next sync interval (default: 60 seconds).
+Changes propagate to proxy instances instantly via webhook push. A poll fallback runs every 5 minutes as a safety net.
+
+## Token Sync: Push + Poll
+
+The proxy uses two mechanisms to stay in sync with the central server:
+
+| Method | Latency | How it works |
+|--------|---------|--------------|
+| **Webhook push** | Sub-second | Central server sends `token.*` events to proxy's `/v1/webhook` |
+| **Poll fallback** | Up to 5 min | Proxy fetches all tokens from central server on a timer |
+
+Both are enabled by default in `proxy-config.yaml`. The webhook receiver authenticates requests using the same shared secret and HMAC signature used by outbound webhooks.
+
+```yaml
+# On the proxy (proxy-config.yaml)
+remote:
+  url: http://config-server:9090
+  api_key: change-me-to-match-remote-server
+  sync: 300                        # Poll fallback every 5 minutes
+  webhook:
+    enabled: true                  # Accept push events from central server
+    secret: change-me-webhook-secret
+    signing_key: change-me-signing-key
+
+# On the central server (central-config.yaml)
+events:
+  webhooks:
+    - url: https://proxy.internal:8443/v1/webhook
+      secret: change-me-webhook-secret
+      signing_key: change-me-signing-key
+      events: ["token.*"]          # Only push token lifecycle events
+```
 
 ## Scaling to Multiple Proxies
 
-Deploy additional proxy instances pointing to the same central config server. Each proxy syncs tokens independently.
+Deploy additional proxy instances pointing to the same central config server. Add a webhook entry on the central server for each proxy.
 
 ```
 Central Config Server (:9090)
-        │
+        │ webhook push
    ┌────┼────┐
    │    │    │
    v    v    v
@@ -175,7 +211,27 @@ Proxy  Proxy  Proxy
 (US)   (EU)   (APAC)
 ```
 
-Each proxy uses the same `proxy-config.yaml` with `remote.url` pointing to the central server. Session tracking (usage counters) is local to each proxy unless you enable Redis:
+Each proxy uses the same `proxy-config.yaml` with `remote.url` pointing to the central server. On the central server, add one outbound webhook per proxy:
+
+```yaml
+# central-config.yaml
+events:
+  webhooks:
+    - url: https://proxy-us.internal:8443/v1/webhook
+      secret: change-me-webhook-secret
+      signing_key: change-me-signing-key
+      events: ["token.*"]
+    - url: https://proxy-eu.internal:8443/v1/webhook
+      secret: change-me-webhook-secret
+      signing_key: change-me-signing-key
+      events: ["token.*"]
+    - url: https://proxy-apac.internal:8443/v1/webhook
+      secret: change-me-webhook-secret
+      signing_key: change-me-signing-key
+      events: ["token.*"]
+```
+
+Session tracking (usage counters) is local to each proxy unless you enable Redis:
 
 ```yaml
 session:

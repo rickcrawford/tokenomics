@@ -269,6 +269,81 @@ Every webhook request includes:
 - The internal queue holds up to 256 events; events are dropped if the queue is full
 - On shutdown, the queue is drained before the process exits
 
+## Webhook Receiver (Inbound)
+
+Proxy instances can also receive inbound webhooks for push-based token sync. When the central config server emits a `token.*` event, it can push that event to all proxy instances via their webhook receiver endpoint. This triggers an immediate remote sync instead of waiting for the poll interval.
+
+### Configuration
+
+On each proxy instance, enable the receiver in `config.yaml`:
+
+```yaml
+remote:
+  url: http://config-server:9090
+  api_key: my-remote-key
+  sync: 300                      # Fallback polling every 5 minutes
+  webhook:
+    enabled: true
+    path: /v1/webhook            # Default path
+    secret: my-webhook-secret    # Must match outbound webhook secret
+    signing_key: my-signing-key  # Must match outbound webhook signing key
+```
+
+On the central config server, add outbound webhooks pointing to each proxy:
+
+```yaml
+events:
+  webhooks:
+    - url: https://proxy-1.internal:8443/v1/webhook
+      secret: my-webhook-secret
+      signing_key: my-signing-key
+      events: ["token.*"]
+
+    - url: https://proxy-2.internal:8443/v1/webhook
+      secret: my-webhook-secret
+      signing_key: my-signing-key
+      events: ["token.*"]
+```
+
+### How It Works
+
+1. Admin creates/updates/deletes a token on the central config server
+2. The central server emits a `token.*` event via its outbound webhooks
+3. Each proxy's webhook receiver validates the request (secret and/or HMAC signature)
+4. On valid `token.*` events, the proxy immediately syncs from the central server
+5. Non-token events (e.g., `request.completed`) are ignored
+6. Rapid successive events are debounced (1 second window)
+
+### Receiver Responses
+
+| Status | Body | Meaning |
+|--------|------|---------|
+| `200` | `{"status":"accepted"}` | Token sync triggered |
+| `200` | `{"status":"debounced"}` | Skipped (synced less than 1 second ago) |
+| `200` | `{"status":"ignored","reason":"not a token event"}` | Non-token event, no sync needed |
+| `400` | `{"error":"invalid json"}` | Malformed request body |
+| `401` | `{"error":"unauthorized"}` | Missing or incorrect `X-Webhook-Secret` |
+| `403` | `{"error":"invalid signature"}` | HMAC signature verification failed |
+| `405` | `{"error":"method not allowed"}` | Not a POST request |
+
+### Authentication
+
+The receiver supports the same authentication mechanisms as outbound webhooks:
+
+- **Shared secret**: Set `remote.webhook.secret` and include `X-Webhook-Secret` in the request
+- **HMAC signature**: Set `remote.webhook.signing_key` and include `X-Webhook-Signature: sha256=<hex>`
+- Both can be used together for defense in depth
+
+### Push vs. Poll
+
+| Method | Latency | Config |
+|--------|---------|--------|
+| Polling only | Up to `sync` seconds | `remote.sync: 60` |
+| Push only | Sub-second | `remote.webhook.enabled: true`, `remote.sync: 0` |
+| Push + poll fallback | Sub-second, with safety net | Both enabled |
+
+The recommended setup is push with a long poll fallback (e.g., `sync: 300`) to handle cases where webhook delivery fails.
+
 ## Interface
 
 The event system is built on the `Emitter` interface:
@@ -281,7 +356,8 @@ type Emitter interface {
 ```
 
 Current implementations:
-- **`WebhookEmitter`** — HTTP POST to a URL
+- **`WebhookEmitter`** — HTTP POST to a URL (outbound)
+- **`WebhookReceiver`** — HTTP endpoint that accepts events and triggers sync (inbound)
 - **`Multi`** — Fan-out to multiple emitters
 - **`Nop`** — No-op (used when no webhooks are configured)
 

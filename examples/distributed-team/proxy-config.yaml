@@ -3,7 +3,8 @@
 # This config is for proxy instances that route requests to LLM providers.
 # Run: ./tokenomics serve
 #
-# Tokens are synced from the central config server on startup and every 60 seconds.
+# Tokens are synced from the central config server on startup, via push
+# webhooks (sub-second), and via polling every 5 minutes as a safety net.
 # Provider API keys must be set as environment variables on this machine.
 
 server:
@@ -38,14 +39,20 @@ logging:
   hide_token_hash: false
 
 # ── Remote Token Sync ──────────────────────────────────────────────────
-# Point to the central config server. Tokens are fetched on startup and
-# re-synced every 60 seconds.
+# Point to the central config server. Tokens are fetched on startup.
+# Push: the webhook receiver accepts token events from the central server
+# for immediate sync. Poll: fallback sync every 300 seconds.
 
 remote:
   url: http://config-server:9090
   api_key: change-me-to-match-remote-server
-  sync: 60
+  sync: 300
   insecure: false
+  webhook:
+    enabled: true
+    path: /v1/webhook
+    secret: change-me-webhook-secret
+    signing_key: change-me-signing-key
 
 # ── Webhook Events ─────────────────────────────────────────────────────
 # Send alerts to your monitoring stack. Uncomment and configure.
