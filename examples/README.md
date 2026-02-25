@@ -238,4 +238,4 @@ curl -s $OPENAI_BASE_URL/v1/chat/completions \
   }'
 ```
 
-Watch Terminal 1 -- you'll see `server.start`, `token.created`, `budget.update`, and `request.completed` events flow in.
+Watch Terminal 1. You'll see `server.start`, `token.created`, `budget.update`, and `request.completed` events flow in.
