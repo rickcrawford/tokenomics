@@ -1,0 +1,129 @@
+{
+  "session_id": "a1b2c3d4",
+  "started_at": "2026-02-25T10:30:00Z",
+  "ended_at": "2026-02-25T11:45:00Z",
+  "duration_ms": 4500000,
+  "git": {
+    "branch": "feature/add-auth",
+    "commit_start": "abc1234",
+    "commit_end": "def5678",
+    "repo_root": "/home/user/myproject"
+  },
+  "totals": {
+    "request_count": 3,
+    "input_tokens": 3500,
+    "output_tokens": 2000,
+    "total_tokens": 5500,
+    "cached_input_tokens": 1200,
+    "cache_creation_tokens": 0,
+    "reasoning_tokens": 450,
+    "error_count": 0,
+    "retry_count": 1,
+    "rule_violation_count": 0,
+    "rate_limit_count": 0
+  },
+  "by_model": {
+    "claude-sonnet-4-20250514": {
+      "request_count": 2,
+      "input_tokens": 2500,
+      "output_tokens": 1500,
+      "total_tokens": 4000,
+      "cached_input_tokens": 1200
+    },
+    "gpt-4o": {
+      "request_count": 1,
+      "input_tokens": 1000,
+      "output_tokens": 500,
+      "total_tokens": 1500,
+      "reasoning_tokens": 450
+    }
+  },
+  "by_provider": {
+    "anthropic": {
+      "request_count": 2,
+      "input_tokens": 2500,
+      "output_tokens": 1500,
+      "total_tokens": 4000,
+      "cached_input_tokens": 1200
+    },
+    "openai": {
+      "request_count": 1,
+      "input_tokens": 1000,
+      "output_tokens": 500,
+      "total_tokens": 1500,
+      "reasoning_tokens": 450
+    }
+  },
+  "by_token": {
+    "a1b2c3d4e5f6g7h8": {
+      "request_count": 3,
+      "input_tokens": 3500,
+      "output_tokens": 2000,
+      "total_tokens": 5500,
+      "models_used": ["claude-sonnet-4-20250514", "gpt-4o"],
+      "first_seen": "2026-02-25T10:30:05Z",
+      "last_seen": "2026-02-25T11:40:00Z"
+    }
+  },
+  "requests": [
+    {
+      "timestamp": "2026-02-25T10:30:05Z",
+      "token_hash": "a1b2c3d4e5f6g7h8",
+      "model": "claude-sonnet-4-20250514",
+      "provider": "anthropic",
+      "input_tokens": 1500,
+      "output_tokens": 800,
+      "duration_ms": 3200,
+      "status_code": 200,
+      "stream": true,
+      "upstream_id": "msg_abc123",
+      "upstream_request_id": "req_def456",
+      "provider_meta": {
+        "actual_model": "claude-sonnet-4-20250514",
+        "finish_reason": "end_turn",
+        "cached_input_tokens": 1200,
+        "rate_limit_remaining_requests": 95,
+        "rate_limit_remaining_tokens": 78000
+      }
+    },
+    {
+      "timestamp": "2026-02-25T10:35:12Z",
+      "token_hash": "a1b2c3d4e5f6g7h8",
+      "model": "claude-sonnet-4-20250514",
+      "provider": "anthropic",
+      "input_tokens": 1000,
+      "output_tokens": 700,
+      "duration_ms": 2800,
+      "status_code": 200,
+      "stream": true,
+      "upstream_id": "msg_xyz789",
+      "provider_meta": {
+        "actual_model": "claude-sonnet-4-20250514",
+        "finish_reason": "end_turn",
+        "rate_limit_remaining_requests": 94,
+        "rate_limit_remaining_tokens": 76000
+      }
+    },
+    {
+      "timestamp": "2026-02-25T11:40:00Z",
+      "token_hash": "a1b2c3d4e5f6g7h8",
+      "model": "gpt-4o",
+      "provider": "openai",
+      "input_tokens": 1000,
+      "output_tokens": 500,
+      "duration_ms": 4100,
+      "status_code": 200,
+      "stream": true,
+      "upstream_id": "chatcmpl-xyz789",
+      "retry_count": 1,
+      "metadata": {"team": "platform"},
+      "provider_meta": {
+        "actual_model": "gpt-4o-2024-11-20",
+        "finish_reason": "stop",
+        "reasoning_tokens": 450,
+        "rate_limit_remaining_requests": 58,
+        "rate_limit_remaining_tokens": 42000
+      }
+    }
+  ]
+}

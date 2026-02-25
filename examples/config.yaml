@@ -54,6 +54,16 @@ logging:
 #     secret: my-webhook-secret      # Must match central server's outbound secret
 #     signing_key: my-signing-key    # Must match central server's outbound signing key
 
+# ── Session Ledger ────────────────────────────────────────────────────
+#
+# Record per-session token usage to a .tokenomics/ directory.
+# Commit session files alongside code for cost-per-feature analysis.
+#
+# ledger:
+#   enabled: true
+#   dir: ".tokenomics"          # Directory for session files
+#   memory: true                # Record conversation content in memory/*.md
+
 # ── Webhook Events ──────────────────────────────────────────────────────
 #
 # Fire HTTP POST requests when things happen.

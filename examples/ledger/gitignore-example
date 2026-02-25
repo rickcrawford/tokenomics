@@ -1,0 +1,7 @@
+# Tokenomics session ledger
+#
+# Option 1: Keep session data, exclude conversation content
+.tokenomics/memory/
+
+# Option 2: Exclude everything
+# .tokenomics/

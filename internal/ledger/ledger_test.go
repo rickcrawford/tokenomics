@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -304,5 +305,327 @@ func TestGenerateSessionID(t *testing.T) {
 	}
 	if len(id1) != 8 {
 		t.Errorf("expected 8 char hex ID, got %d chars: %s", len(id1), id1)
+	}
+}
+
+func TestConcurrentRecordRequest(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, false)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	const numGoroutines = 50
+	const requestsPerGoroutine = 10
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
+		go func(g int) {
+			defer wg.Done()
+			for j := 0; j < requestsPerGoroutine; j++ {
+				l.RecordRequest(RequestEntry{
+					Timestamp:    time.Now().UTC(),
+					TokenHash:    "tok_concurrent",
+					Model:        "gpt-4",
+					Provider:     "openai",
+					InputTokens:  10,
+					OutputTokens: 5,
+					StatusCode:   200,
+				})
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sessions, _ := ReadSessionFiles(dir)
+	s := sessions[0]
+	expected := int64(numGoroutines * requestsPerGoroutine)
+	if s.Totals.RequestCount != expected {
+		t.Errorf("expected %d requests, got %d", expected, s.Totals.RequestCount)
+	}
+}
+
+func TestMultipleSessions(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create two sessions in the same directory
+	l1, err := Open(dir, false)
+	if err != nil {
+		t.Fatalf("Open l1: %v", err)
+	}
+	l1.RecordRequest(RequestEntry{
+		Timestamp: time.Now().UTC(), TokenHash: "tok1", Model: "gpt-4",
+		InputTokens: 100, OutputTokens: 50, StatusCode: 200,
+	})
+	if err := l1.Close(); err != nil {
+		t.Fatalf("Close l1: %v", err)
+	}
+
+	l2, err := Open(dir, false)
+	if err != nil {
+		t.Fatalf("Open l2: %v", err)
+	}
+	l2.RecordRequest(RequestEntry{
+		Timestamp: time.Now().UTC(), TokenHash: "tok2", Model: "claude-3-opus",
+		InputTokens: 200, OutputTokens: 100, StatusCode: 200,
+	})
+	if err := l2.Close(); err != nil {
+		t.Fatalf("Close l2: %v", err)
+	}
+
+	sessions, err := ReadSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("ReadSessionFiles: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Errorf("expected 2 sessions, got %d", len(sessions))
+	}
+
+	// Each session should have unique IDs
+	if sessions[0].SessionID == sessions[1].SessionID {
+		t.Error("sessions should have different IDs")
+	}
+}
+
+func TestReadSessionFilesSkipsCorrupted(t *testing.T) {
+	dir := t.TempDir()
+	sessDir := filepath.Join(dir, "sessions")
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
+
+	// Write a valid session file
+	valid := &SessionSummary{
+		SessionID: "valid123",
+		StartedAt: time.Now().Format(time.RFC3339),
+		EndedAt:   time.Now().Format(time.RFC3339),
+		Totals:    SessionTotals{UsageRollup: UsageRollup{RequestCount: 1}},
+		ByModel:   make(map[string]*UsageRollup),
+		ByProvider: make(map[string]*UsageRollup),
+		ByToken:   make(map[string]*TokenRollup),
+	}
+	data, _ := json.Marshal(valid)
+	os.WriteFile(filepath.Join(sessDir, "2026-02-25_valid123.json"), data, 0o644)
+
+	// Write a corrupted file
+	os.WriteFile(filepath.Join(sessDir, "2026-02-25_corrupt.json"), []byte("{invalid json"), 0o644)
+
+	// Write a non-JSON file (should be skipped)
+	os.WriteFile(filepath.Join(sessDir, "notes.txt"), []byte("not a session"), 0o644)
+
+	sessions, err := ReadSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("ReadSessionFiles: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("expected 1 valid session (skipping corrupted), got %d", len(sessions))
+	}
+	if sessions[0].SessionID != "valid123" {
+		t.Errorf("expected session valid123, got %s", sessions[0].SessionID)
+	}
+}
+
+func TestEmptySessionClose(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, false)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Close immediately with no requests
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sessions, _ := ReadSessionFiles(dir)
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+
+	s := sessions[0]
+	if s.Totals.RequestCount != 0 {
+		t.Errorf("expected 0 requests, got %d", s.Totals.RequestCount)
+	}
+	if s.DurationMs < 0 {
+		t.Errorf("expected non-negative duration, got %d", s.DurationMs)
+	}
+}
+
+func TestRecordMemoryNoWriter(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, false) // memory=false
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer l.Close()
+
+	// Should be a no-op, not an error
+	err = l.RecordMemory("tok1", "user", "gpt-4", "hello")
+	if err != nil {
+		t.Errorf("RecordMemory with no writer should return nil, got: %v", err)
+	}
+}
+
+func TestTokenRollupMultiModel(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, false)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	now := time.Now().UTC()
+	// Same token, different models
+	l.RecordRequest(RequestEntry{
+		Timestamp: now, TokenHash: "multi_tok", Model: "gpt-4",
+		InputTokens: 100, OutputTokens: 50, StatusCode: 200,
+	})
+	l.RecordRequest(RequestEntry{
+		Timestamp: now.Add(time.Second), TokenHash: "multi_tok", Model: "claude-3-opus",
+		InputTokens: 200, OutputTokens: 100, StatusCode: 200,
+	})
+	l.RecordRequest(RequestEntry{
+		Timestamp: now.Add(2 * time.Second), TokenHash: "multi_tok", Model: "gpt-4",
+		InputTokens: 150, OutputTokens: 75, StatusCode: 200,
+	})
+
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sessions, _ := ReadSessionFiles(dir)
+	tr := sessions[0].ByToken["multi_tok"]
+	if tr == nil {
+		t.Fatal("missing token rollup")
+	}
+	if len(tr.ModelsUsed) != 2 {
+		t.Errorf("expected 2 models used, got %d: %v", len(tr.ModelsUsed), tr.ModelsUsed)
+	}
+	if tr.RequestCount != 3 {
+		t.Errorf("expected 3 requests, got %d", tr.RequestCount)
+	}
+	if tr.FirstSeen == tr.LastSeen {
+		t.Error("expected different first_seen and last_seen")
+	}
+}
+
+func TestSessionFileNaming(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, false)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	files, _ := os.ReadDir(filepath.Join(dir, "sessions"))
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+
+	name := files[0].Name()
+	// Should match pattern: YYYY-MM-DD_<hex>.json
+	if len(name) < 20 {
+		t.Errorf("filename too short: %s", name)
+	}
+	if name[4] != '-' || name[7] != '-' || name[10] != '_' {
+		t.Errorf("unexpected filename format: %s", name)
+	}
+	if filepath.Ext(name) != ".json" {
+		t.Errorf("expected .json extension, got %s", name)
+	}
+}
+
+func TestCacheCreationTokenRollup(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, false)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	l.RecordRequest(RequestEntry{
+		Timestamp: time.Now().UTC(), TokenHash: "tok1", Model: "claude-3-opus",
+		Provider: "anthropic", InputTokens: 500, OutputTokens: 200, StatusCode: 200,
+		ProviderMeta: &ProviderMeta{
+			CachedInputTokens:  100,
+			CacheCreationTokens: 200,
+		},
+	})
+	l.RecordRequest(RequestEntry{
+		Timestamp: time.Now().UTC(), TokenHash: "tok1", Model: "claude-3-opus",
+		Provider: "anthropic", InputTokens: 300, OutputTokens: 150, StatusCode: 200,
+		ProviderMeta: &ProviderMeta{
+			CachedInputTokens:  250,
+			CacheCreationTokens: 50,
+		},
+	})
+
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sessions, _ := ReadSessionFiles(dir)
+	s := sessions[0]
+
+	if s.Totals.CachedInputTokens != 350 {
+		t.Errorf("expected 350 cached, got %d", s.Totals.CachedInputTokens)
+	}
+	if s.Totals.CacheCreationTokens != 250 {
+		t.Errorf("expected 250 cache creation, got %d", s.Totals.CacheCreationTokens)
+	}
+
+	// Check model rollup too
+	m := s.ByModel["claude-3-opus"]
+	if m.CachedInputTokens != 350 {
+		t.Errorf("model cached: expected 350, got %d", m.CachedInputTokens)
+	}
+	if m.CacheCreationTokens != 250 {
+		t.Errorf("model cache creation: expected 250, got %d", m.CacheCreationTokens)
+	}
+}
+
+func TestContainsStr(t *testing.T) {
+	if containsStr(nil, "a") {
+		t.Error("nil slice should not contain anything")
+	}
+	if containsStr([]string{"a", "b"}, "c") {
+		t.Error("should not find 'c'")
+	}
+	if !containsStr([]string{"a", "b"}, "b") {
+		t.Error("should find 'b'")
+	}
+}
+
+func TestAddToRollup(t *testing.T) {
+	m := make(map[string]*UsageRollup)
+	addToRollup(m, "test", 100, 50, 10, 5, 20)
+	addToRollup(m, "test", 200, 100, 30, 0, 0)
+
+	r := m["test"]
+	if r.RequestCount != 2 {
+		t.Errorf("expected 2 requests, got %d", r.RequestCount)
+	}
+	if r.InputTokens != 300 {
+		t.Errorf("expected 300 input, got %d", r.InputTokens)
+	}
+	if r.OutputTokens != 150 {
+		t.Errorf("expected 150 output, got %d", r.OutputTokens)
+	}
+	if r.TotalTokens != 450 {
+		t.Errorf("expected 450 total, got %d", r.TotalTokens)
+	}
+	if r.CachedInputTokens != 40 {
+		t.Errorf("expected 40 cached, got %d", r.CachedInputTokens)
+	}
+	if r.CacheCreationTokens != 5 {
+		t.Errorf("expected 5 cache creation, got %d", r.CacheCreationTokens)
+	}
+	if r.ReasoningTokens != 20 {
+		t.Errorf("expected 20 reasoning, got %d", r.ReasoningTokens)
 	}
 }

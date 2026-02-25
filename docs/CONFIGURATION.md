@@ -81,6 +81,12 @@ cli_maps:                    # Map CLI names to providers for `tokenomics run`
   python: generic
   node: generic
   curl: generic
+
+# ── Session Ledger ───────────────────────────────────────────────────
+ledger:
+  enabled: false             # Enable per-session token tracking to .tokenomics/
+  dir: ".tokenomics"         # Directory for session files
+  memory: true               # Record conversation content in memory/ subdirectory
 ```
 
 ### Field Descriptions
@@ -122,6 +128,9 @@ cli_maps:                    # Map CLI names to providers for `tokenomics run`
 | `remote.webhook.secret` | (empty) | Expected value of the `X-Webhook-Secret` header on inbound webhooks. |
 | `remote.webhook.signing_key` | (empty) | HMAC-SHA256 key for verifying `X-Webhook-Signature` on inbound webhooks. |
 | `cli_maps` | (see below) | Maps CLI names to providers for auto-detection in `tokenomics run`. Example: `claude: anthropic` means `tokenomics run claude` uses the anthropic provider. |
+| `ledger.enabled` | `false` | Enable per-session token tracking to the `.tokenomics/` directory. |
+| `ledger.dir` | `.tokenomics` | Directory for session files and memory logs. |
+| `ledger.memory` | `true` | Record conversation content (user/assistant messages) in memory markdown files. |
 
 ## Logging
 
@@ -164,6 +173,9 @@ Every config field can be overridden with a `TOKENOMICS_` prefixed environment v
 | `remote.url` | `TOKENOMICS_REMOTE_URL` |
 | `remote.api_key` | `TOKENOMICS_REMOTE_API_KEY` |
 | `remote.sync` | `TOKENOMICS_REMOTE_SYNC` |
+| `ledger.enabled` | `TOKENOMICS_LEDGER_ENABLED` |
+| `ledger.dir` | `TOKENOMICS_LEDGER_DIR` |
+| `ledger.memory` | `TOKENOMICS_LEDGER_MEMORY` |
 
 Example:
 

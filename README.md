@@ -172,6 +172,7 @@ See [examples/](examples/) for provider configs, sample policies, env setup, and
 | **Remote sync** | Load tokens from a central config server via push webhooks or polling |
 | **Logging control** | Configurable log level, format, request suppression, token hash masking |
 | **Structured logging** | JSON logs with rule matches, upstream IDs, and cost metadata |
+| **Session ledger** | Per-session token tracking to `.tokenomics/` for cost-per-feature analysis |
 
 ## Documentation
 
@@ -185,6 +186,7 @@ See [examples/](examples/) for provider configs, sample policies, env setup, and
 | [TLS](docs/TLS.md) | Auto-generated certificates, CA trust, custom certs |
 | [Stats & Logging](docs/STATS_AND_LOGGING.md) | Request logging, /stats endpoint, usage tracking |
 | [Events & Webhooks](docs/EVENTS.md) | Webhook events for token CRUD, rule violations, budget alerts |
+| [Session Ledger](docs/LEDGER.md) | Per-session token tracking, CLI commands, session JSON format |
 
 ## Author
 
