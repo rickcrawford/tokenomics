@@ -73,6 +73,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 		if p.Signal(syscall.Signal(0)) != nil {
 			// Process is gone
 			os.Remove(pidFile)
+			fmt.Fprintf(os.Stderr, "Proxy stopped (PID %d)\n", pid)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -85,5 +86,6 @@ func runStop(cmd *cobra.Command, args []string) error {
 
 	// Remove PID file
 	os.Remove(pidFile)
+	fmt.Fprintf(os.Stderr, "Proxy killed (PID %d)\n", pid)
 	return nil
 }

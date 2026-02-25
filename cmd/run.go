@@ -20,16 +20,16 @@ var runCmd = &cobra.Command{
 with environment variables configured to use the proxy. The proxy is automatically
 shut down when the command exits.
 
+Unlike 'start', which runs a persistent daemon, 'run' creates an ephemeral proxy
+that lives only for the duration of the command. It defaults to plain HTTP on
+localhost since traffic never leaves the machine.
+
 If --proxy-url or $TOKENOMICS_PROXY_URL is set, uses a remote proxy instead
 of starting a local one.
 
-Usage:
-  tokenomics run [flags] COMMAND [ARGS...]
-
-The -- separator is optional. Use it only if your command has flags that conflict with tokenomics flags.
-
-Examples:
-  tokenomics run claude "What is AI?"
+The -- separator is optional. Use it only if your command has flags that conflict
+with tokenomics flags.`,
+	Example: `  tokenomics run claude "What is AI?"
   tokenomics run --provider anthropic -- python my_script.py
   TOKENOMICS_KEY=tkn_abc123 tokenomics run claude
   TOKENOMICS_PROXY_URL=https://proxy.example.com:8443 tokenomics run claude "test"
@@ -53,9 +53,9 @@ func init() {
 	runCmd.Flags().StringVar(&runToken, "token", "", "wrapper token (read from $TOKENOMICS_KEY if not provided)")
 	runCmd.Flags().StringVar(&runProxyURL, "proxy-url", "", "remote proxy URL (read from $TOKENOMICS_PROXY_URL if not provided; if set, uses remote proxy instead of starting local)")
 	runCmd.Flags().StringVar(&runHost, "host", "localhost", "proxy hostname (only used if starting local proxy)")
-	runCmd.Flags().IntVar(&runPort, "port", 8443, "proxy port (only used if starting local proxy)")
-	runCmd.Flags().BoolVar(&runTLS, "tls", true, "use HTTPS (only used if starting local proxy)")
-	runCmd.Flags().BoolVar(&runInsecure, "insecure", false, "skip TLS verification (not recommended; install valid certificates instead)")
+	runCmd.Flags().IntVar(&runPort, "port", 8080, "proxy port (only used if starting local proxy)")
+	runCmd.Flags().BoolVar(&runTLS, "tls", false, "use HTTPS (default false for run, traffic is localhost only)")
+	runCmd.Flags().BoolVar(&runInsecure, "insecure", false, "skip TLS verification")
 	runCmd.Flags().StringVar(&runProvider, "provider", "generic", "target provider (generic, anthropic, azure, gemini, custom)")
 	runCmd.Flags().StringVar(&runEnvKey, "env-key", "", "custom env var name for the API key")
 	runCmd.Flags().StringVar(&runEnvBase, "env-base-url", "", "custom env var name for the base URL")
@@ -106,13 +106,31 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	var serveCmd *exec.Cmd
 
+	// Determine scheme and base URL
+	scheme := "http"
+	if runTLS {
+		scheme = "https"
+	}
+
 	// If proxy URL is provided, use remote proxy; otherwise start local proxy
 	baseURL := runProxyURL
 	if baseURL == "" {
-		// Start serve process in background
-		serveCmd = exec.Command(os.Args[0], "serve", "--config", cfgFile, "--db", dbPath)
+		baseURL = fmt.Sprintf("%s://%s:%d", scheme, runHost, runPort)
+
+		// Build serve args. Override the port via environment so we control
+		// exactly which port the ephemeral proxy binds to.
+		serveArgs := []string{"serve", "--config", cfgFile, "--db", dbPath}
+		serveCmd = exec.Command(os.Args[0], serveArgs...)
 		serveCmd.Stdout = os.Stderr
 		serveCmd.Stderr = os.Stderr
+		// Tell serve which port to bind, overriding config defaults.
+		serveCmd.Env = append(os.Environ(),
+			fmt.Sprintf("TOKENOMICS_SERVER_HTTP_PORT=%d", runPort),
+		)
+		if !runTLS {
+			// Disable TLS for local-only traffic.
+			serveCmd.Env = append(serveCmd.Env, "TOKENOMICS_SERVER_TLS_ENABLED=false")
+		}
 
 		if err := serveCmd.Start(); err != nil {
 			return fmt.Errorf("start proxy: %w", err)
@@ -127,24 +145,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// Wait for proxy to be ready (poll health endpoint)
-	scheme := "https"
-	if !runTLS {
-		scheme = "http"
-	}
-
-	// If no proxy URL provided, construct it from host/port
-	if runProxyURL == "" {
-		baseURL = fmt.Sprintf("%s://%s:%d", scheme, runHost, runPort)
-	}
-
 	healthURL := fmt.Sprintf("%s/ping", baseURL)
 
 	// Create HTTP client with optional TLS skip
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
-	if runInsecure {
+	if runTLS && runInsecure {
 		client.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
