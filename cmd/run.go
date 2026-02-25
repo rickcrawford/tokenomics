@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
@@ -140,7 +139,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// Cleanup function to ensure local proxy is shut down (no-op if using remote)
 	defer func() {
 		if serveCmd != nil && serveCmd.Process != nil {
-			serveCmd.Process.Signal(syscall.SIGINT)
+			interruptProcess(serveCmd.Process)
 			serveCmd.Wait()
 		}
 	}()

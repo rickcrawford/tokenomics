@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
@@ -325,9 +324,7 @@ func startDaemon(baseURL string, dc daemonConfig) error {
 	serveCmd := exec.Command(os.Args[0], "serve", "--config", cfgFile, "--db", dbPath)
 	serveCmd.Stdout = logFd
 	serveCmd.Stderr = logFd
-	serveCmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true, // Detach from TTY
-	}
+	detachProcess(serveCmd)
 
 	if err := serveCmd.Start(); err != nil {
 		return fmt.Errorf("start proxy: %w", err)
@@ -385,15 +382,6 @@ func readPIDFile(path string) (int, error) {
 
 func writePIDFile(path string, pid int) error {
 	return os.WriteFile(path, []byte(fmt.Sprintf("%d", pid)), 0o644)
-}
-
-func processAlive(pid int) bool {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Unix, FindProcess always succeeds; we must send signal 0 to check
-	return p.Signal(syscall.Signal(0)) == nil
 }
 
 // ResolveEnvPairs determines the environment variable pairs for the given CLI target.

@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -60,8 +59,8 @@ func runStop(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Send SIGTERM
-	if err := p.Signal(syscall.SIGTERM); err != nil {
+	// Request graceful shutdown
+	if err := terminateProcess(p); err != nil {
 		// Process might already be dead
 		os.Remove(pidFile)
 		fmt.Fprintf(os.Stderr, "Proxy not running (signal failed)\n")
@@ -70,8 +69,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 
 	// Poll briefly to confirm exit
 	for i := 0; i < 30; i++ {
-		if p.Signal(syscall.Signal(0)) != nil {
-			// Process is gone
+		if !processAlive(pid) {
 			os.Remove(pidFile)
 			fmt.Fprintf(os.Stderr, "Proxy stopped (PID %d)\n", pid)
 			return nil
@@ -79,8 +77,8 @@ func runStop(cmd *cobra.Command, args []string) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// If still alive, send SIGKILL
-	if err := p.Signal(syscall.SIGKILL); err == nil {
+	// Force kill if still alive
+	if err := killProcess(p); err == nil {
 		time.Sleep(100 * time.Millisecond)
 	}
 
