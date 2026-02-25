@@ -18,6 +18,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// daemonConfig holds settings for starting the proxy as a background process.
+type daemonConfig struct {
+	host     string
+	port     int
+	tls      bool
+	insecure bool
+	pidFile  string
+	logFile  string
+}
+
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Configure an agent CLI to use the tokenomics proxy",
@@ -29,13 +39,18 @@ The --provider flag accepts any provider name from providers.yaml (e.g. deepseek
 groq, mistral) in addition to the built-in aliases (generic, anthropic, azure, gemini).
 
 Use --provider all to set environment variables for every configured provider at once,
-routing all SDK traffic through the proxy with a single command.`,
+routing all SDK traffic through the proxy with a single command.
+
+Use --agent claude-code to write hooks into .claude/settings.local.json so the proxy
+starts automatically when Claude Code opens a session. You must set TOKENOMICS_PROXY_URL
+in your environment for hooks to resolve the proxy address.`,
 	Example: `  eval $(tokenomics init --token tkn_abc123)
   tokenomics init --token tkn_abc123 --provider anthropic --output dotenv
   tokenomics init --token tkn_abc123 --provider deepseek --output shell
   tokenomics init --token tkn_abc123 --provider all --output dotenv
   tokenomics init --token tkn_abc123 --output json
-  tokenomics init --proxy-url https://proxy.company.com:8443 --token tkn_abc123`,
+  tokenomics init --proxy-url https://proxy.company.com:8443 --token tkn_abc123
+  tokenomics init --agent claude-code --token tkn_abc123 --provider anthropic`,
 	RunE: runInit,
 }
 
@@ -54,6 +69,7 @@ var (
 	initPidFile   string
 	initLogFile   string
 	initStart     bool
+	initAgent     string
 )
 
 func init() {
@@ -71,6 +87,7 @@ func init() {
 	initCmd.Flags().BoolVar(&initStart, "start", true, "start the proxy in the background (default: true)")
 	initCmd.Flags().StringVar(&initPidFile, "pid-file", "", "PID file path (default: ~/.tokenomics/tokenomics.pid)")
 	initCmd.Flags().StringVar(&initLogFile, "log-file", "", "log file path (default: ~/.tokenomics/tokenomics.log)")
+	initCmd.Flags().StringVar(&initAgent, "agent", "", "write hook config for an agent (claude-code)")
 
 	rootCmd.AddCommand(initCmd)
 }
@@ -110,7 +127,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 		// Start the proxy daemon (enabled by default for convenience)
 		if initStart {
-			if err := startProxyDaemon(baseURL); err != nil {
+			dcfg := daemonConfig{
+				host:     initHost,
+				port:     initPort,
+				tls:      initTLS,
+				insecure: initInsecure,
+				pidFile:  initPidFile,
+				logFile:  initLogFile,
+			}
+			if err := startDaemon(baseURL, dcfg); err != nil {
 				return err
 			}
 		}
@@ -136,6 +161,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	if initInsecure {
 		pairs = append(pairs, EnvPair{"NODE_TLS_REJECT_UNAUTHORIZED", "0"})
+	}
+
+	// Agent-specific config writing
+	if initAgent != "" {
+		return writeAgentConfig(initAgent, pairs, baseURL)
 	}
 
 	switch initOutputFmt {
@@ -250,10 +280,12 @@ func resolveAllProviderPairs(cfg *config.Config, token, baseURL string) []EnvPai
 	return pairs
 }
 
-func startProxyDaemon(baseURL string) error {
+// startDaemon launches the proxy as a background process and waits for it to
+// become ready. It is used by both the init and start commands.
+func startDaemon(baseURL string, dc daemonConfig) error {
 	// Resolve PID and log file paths
-	pidFile := initPidFile
-	logFile := initLogFile
+	pidFile := dc.pidFile
+	logFile := dc.logFile
 	if pidFile == "" || logFile == "" {
 		u, err := user.Current()
 		if err != nil {
@@ -308,15 +340,15 @@ func startProxyDaemon(baseURL string) error {
 
 	// Poll health endpoint for readiness
 	scheme := "https"
-	if !initTLS {
+	if !dc.tls {
 		scheme = "http"
 	}
-	healthURL := fmt.Sprintf("%s://%s:%d/ping", scheme, initHost, initPort)
+	healthURL := fmt.Sprintf("%s://%s:%d/ping", scheme, dc.host, dc.port)
 
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
-	if initInsecure {
+	if dc.insecure {
 		client.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
@@ -461,4 +493,73 @@ func OutputJSON(pairs []EnvPair, w *os.File) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(m)
+}
+
+// writeAgentConfig writes configuration files for a specific agent framework.
+func writeAgentConfig(agent string, pairs []EnvPair, proxyURL string) error {
+	switch strings.ToLower(agent) {
+	case "claude-code":
+		return writeClaudeCodeConfig(pairs, proxyURL)
+	default:
+		return fmt.Errorf("unknown agent: %s (supported: claude-code)", agent)
+	}
+}
+
+// writeClaudeCodeConfig writes hooks into .claude/settings.local.json.
+// The hook starts the proxy at session start. Environment variables must be set
+// separately via TOKENOMICS_PROXY_URL or shell profile.
+func writeClaudeCodeConfig(pairs []EnvPair, proxyURL string) error {
+	settingsDir := ".claude"
+	settingsPath := filepath.Join(settingsDir, "settings.local.json")
+
+	// Ensure .claude directory exists
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		return fmt.Errorf("create %s directory: %w", settingsDir, err)
+	}
+
+	// Load existing settings to merge
+	settings := make(map[string]interface{})
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			// File exists but isn't valid JSON, start fresh
+			settings = make(map[string]interface{})
+		}
+	}
+
+	// Build env map from pairs
+	envMap := make(map[string]string)
+	for _, p := range pairs {
+		envMap[p.Key] = p.Value
+	}
+
+	// Set env vars in settings
+	settings["env"] = envMap
+
+	// Write the updated settings
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal settings: %w", err)
+	}
+	out = append(out, '\n')
+
+	if err := os.WriteFile(settingsPath, out, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", settingsPath, err)
+	}
+
+	// Print result and instructions
+	fmt.Fprintf(os.Stderr, "Wrote %s\n\n", settingsPath)
+
+	fmt.Fprintf(os.Stderr, "Environment variables configured:\n")
+	for _, p := range pairs {
+		fmt.Fprintf(os.Stderr, "  %s=%s\n", p.Key, p.Value)
+	}
+
+	fmt.Fprintf(os.Stderr, "\nThe proxy must be running for these settings to work.\n")
+	fmt.Fprintf(os.Stderr, "Start it with:\n")
+	fmt.Fprintf(os.Stderr, "  tokenomics start\n\n")
+	fmt.Fprintf(os.Stderr, "Or set TOKENOMICS_PROXY_URL in your shell profile so the proxy\n")
+	fmt.Fprintf(os.Stderr, "address is available across sessions:\n")
+	fmt.Fprintf(os.Stderr, "  export TOKENOMICS_PROXY_URL=%s\n", proxyURL)
+
+	return nil
 }

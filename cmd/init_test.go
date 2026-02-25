@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
@@ -395,5 +398,140 @@ func TestEnvPairsFromProviderConfig_GeneratesDefaultEnvNames(t *testing.T) {
 	}
 	if pairs[1].Key != "MY_PROVIDER_BASE_URL" {
 		t.Errorf("base url env = %q, want MY_PROVIDER_BASE_URL", pairs[1].Key)
+	}
+}
+
+func TestWriteAgentConfig_UnknownAgent(t *testing.T) {
+	err := writeAgentConfig("unknown-agent", []EnvPair{{"K", "V"}}, "https://localhost:8443")
+	if err == nil {
+		t.Fatal("expected error for unknown agent")
+	}
+	if !strings.Contains(err.Error(), "unknown agent") {
+		t.Errorf("error = %q, want to contain 'unknown agent'", err.Error())
+	}
+}
+
+func TestWriteClaudeCodeConfig(t *testing.T) {
+	// Create a temp directory to act as the working directory
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	pairs := []EnvPair{
+		{"ANTHROPIC_API_KEY", "tkn_test123"},
+		{"ANTHROPIC_BASE_URL", "https://localhost:8443"},
+	}
+
+	err := writeClaudeCodeConfig(pairs, "https://localhost:8443")
+	if err != nil {
+		t.Fatalf("writeClaudeCodeConfig: %v", err)
+	}
+
+	// Read and verify the written file
+	data, err := os.ReadFile(".claude/settings.local.json")
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	// Check env section
+	env, ok := settings["env"].(map[string]interface{})
+	if !ok {
+		t.Fatal("settings missing 'env' key or wrong type")
+	}
+
+	if env["ANTHROPIC_API_KEY"] != "tkn_test123" {
+		t.Errorf("ANTHROPIC_API_KEY = %v, want tkn_test123", env["ANTHROPIC_API_KEY"])
+	}
+	if env["ANTHROPIC_BASE_URL"] != "https://localhost:8443" {
+		t.Errorf("ANTHROPIC_BASE_URL = %v, want https://localhost:8443", env["ANTHROPIC_BASE_URL"])
+	}
+}
+
+func TestWriteClaudeCodeConfig_MergesExistingSettings(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	// Write existing settings
+	os.MkdirAll(".claude", 0o755)
+	existing := `{"allowedTools": ["Bash"], "customField": true}`
+	os.WriteFile(".claude/settings.local.json", []byte(existing), 0o644)
+
+	pairs := []EnvPair{
+		{"OPENAI_API_KEY", "tkn_abc"},
+		{"OPENAI_BASE_URL", "https://localhost:8443/v1"},
+	}
+
+	err := writeClaudeCodeConfig(pairs, "https://localhost:8443")
+	if err != nil {
+		t.Fatalf("writeClaudeCodeConfig: %v", err)
+	}
+
+	data, err := os.ReadFile(".claude/settings.local.json")
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	// Existing fields preserved
+	if settings["customField"] != true {
+		t.Error("existing customField was not preserved")
+	}
+
+	tools, ok := settings["allowedTools"].([]interface{})
+	if !ok || len(tools) != 1 || tools[0] != "Bash" {
+		t.Errorf("allowedTools not preserved: %v", settings["allowedTools"])
+	}
+
+	// New env section added
+	env, ok := settings["env"].(map[string]interface{})
+	if !ok {
+		t.Fatal("env section not added")
+	}
+	if env["OPENAI_API_KEY"] != "tkn_abc" {
+		t.Errorf("OPENAI_API_KEY = %v, want tkn_abc", env["OPENAI_API_KEY"])
+	}
+}
+
+func TestWriteClaudeCodeConfig_CreatesDirectory(t *testing.T) {
+	dir := t.TempDir()
+	origDir, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origDir)
+
+	pairs := []EnvPair{{"KEY", "VAL"}}
+	err := writeClaudeCodeConfig(pairs, "https://localhost:8443")
+	if err != nil {
+		t.Fatalf("writeClaudeCodeConfig: %v", err)
+	}
+
+	// Directory should have been created
+	if _, err := os.Stat(".claude"); os.IsNotExist(err) {
+		t.Error(".claude directory was not created")
+	}
+
+	if _, err := os.Stat(".claude/settings.local.json"); os.IsNotExist(err) {
+		t.Error("settings.local.json was not created")
+	}
+}
+
+func TestInitCmd_AgentFlag(t *testing.T) {
+	f := initCmd.Flags().Lookup("agent")
+	if f == nil {
+		t.Fatal("init command missing --agent flag")
+	}
+	if f.DefValue != "" {
+		t.Errorf("--agent default = %q, want empty", f.DefValue)
 	}
 }
