@@ -146,30 +146,24 @@ PII types: `ssn`, `credit_card`, `email`, `phone`, `ip_address`, `aws_key`, `api
 
 ### Memory (Session Logging)
 
-Log conversations to a file or Redis for audit trails and debugging.
+Log conversations to per-session files or Redis for audit trails and debugging.
 
 ```json
 {
   "memory": {
     "enabled": true,
-    "file_path": "./memory/sessions.md"
+    "file_path": "./memory",
+    "file_name": "{token_hash}.md"
   }
 }
 ```
 
-File entries are markdown formatted:
+`file_path` is the directory, `file_name` is the per-session name pattern. Placeholders: `{token_hash}` (first 16 chars of hash), `{date}` (YYYY-MM-DD). Patterns can include subdirectories, e.g. `{date}/{token_hash}.md`.
 
-```
-## <timestamp> | <token_hash_prefix> | <role> | <model>
+For single-file mode (legacy), omit `file_name` and set `file_path` to a file path.
+For Redis-based memory, use `"redis": true` instead. Entries are pushed to `tokenomics:memory:<session_id>`.
 
-<content>
-
----
-```
-
-For Redis-based memory, use `"redis": true` instead of `file_path`. Entries are pushed to `tokenomics:memory:<session_id>`.
-
-See `examples/memory-sample.md` for a full sample output file.
+See `examples/memory-sample.md` for full sample output.
 
 ### Policy Templates
 

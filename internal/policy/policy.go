@@ -15,7 +15,8 @@ type Message struct {
 // MemoryConfig controls session memory (conversation logging).
 type MemoryConfig struct {
 	Enabled  bool   `json:"enabled,omitempty"`
-	FilePath string `json:"file_path,omitempty"` // Append markdown to this file per session
+	FilePath string `json:"file_path,omitempty"` // Directory for per-session files, or single file path when FileName is empty
+	FileName string `json:"file_name,omitempty"` // Per-session file name pattern, e.g. "{token_hash}.md" or "{date}/{token_hash}.md"
 	Redis    bool   `json:"redis,omitempty"`     // Push to Redis collection by session
 }
 

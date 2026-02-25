@@ -102,6 +102,172 @@ func TestNopMemoryWriter(t *testing.T) {
 	}
 }
 
+func TestDirMemoryWriter_PerSessionFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	w, err := NewDirMemoryWriter(dir, "{token_hash}.md")
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	// Write to two different sessions
+	if err := w.Append("aaaa1111bbbb2222cccc3333", "user", "gpt-4", "Hello from session A"); err != nil {
+		t.Fatalf("append session A: %v", err)
+	}
+	if err := w.Append("dddd4444eeee5555ffff6666", "user", "gpt-4", "Hello from session B"); err != nil {
+		t.Fatalf("append session B: %v", err)
+	}
+	if err := w.Append("aaaa1111bbbb2222cccc3333", "assistant", "gpt-4", "Reply to session A"); err != nil {
+		t.Fatalf("append session A reply: %v", err)
+	}
+
+	// Session A file should have 2 entries
+	dataA, err := os.ReadFile(filepath.Join(dir, "aaaa1111bbbb2222.md"))
+	if err != nil {
+		t.Fatalf("read session A file: %v", err)
+	}
+	if !strings.Contains(string(dataA), "Hello from session A") {
+		t.Error("session A missing user message")
+	}
+	if !strings.Contains(string(dataA), "Reply to session A") {
+		t.Error("session A missing assistant reply")
+	}
+	if strings.Contains(string(dataA), "session B") {
+		t.Error("session A file should not contain session B content")
+	}
+
+	// Session B file should have 1 entry
+	dataB, err := os.ReadFile(filepath.Join(dir, "dddd4444eeee5555.md"))
+	if err != nil {
+		t.Fatalf("read session B file: %v", err)
+	}
+	if !strings.Contains(string(dataB), "Hello from session B") {
+		t.Error("session B missing user message")
+	}
+}
+
+func TestDirMemoryWriter_DateSubdirectory(t *testing.T) {
+	dir := t.TempDir()
+
+	w, err := NewDirMemoryWriter(dir, "{date}/{token_hash}.md")
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	if err := w.Append("aaaa1111bbbb2222cccc3333", "user", "gpt-4", "Hello"); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// File should exist in a date-named subdirectory
+	resolved := w.ResolvePath("aaaa1111bbbb2222cccc3333")
+	if _, err := os.Stat(resolved); os.IsNotExist(err) {
+		t.Fatalf("expected file at %s to exist", resolved)
+	}
+	if !strings.Contains(resolved, dir) {
+		t.Errorf("resolved path %q should be under %q", resolved, dir)
+	}
+}
+
+func TestDirMemoryWriter_DefaultPattern(t *testing.T) {
+	dir := t.TempDir()
+
+	w, err := NewDirMemoryWriter(dir, "")
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	if err := w.Append("aaaa1111bbbb2222cccc3333", "user", "gpt-4", "Hello"); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Default pattern is {token_hash}.md
+	expected := filepath.Join(dir, "aaaa1111bbbb2222.md")
+	if _, err := os.Stat(expected); os.IsNotExist(err) {
+		t.Fatalf("expected default file at %s", expected)
+	}
+}
+
+func TestDirMemoryWriter_Close(t *testing.T) {
+	dir := t.TempDir()
+
+	w, err := NewDirMemoryWriter(dir, "{token_hash}.md")
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+
+	if err := w.Append("aaaa1111bbbb2222cccc3333", "user", "gpt-4", "Hello"); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// After close, files map should be empty
+	if len(w.files) != 0 {
+		t.Errorf("expected 0 open files after close, got %d", len(w.files))
+	}
+}
+
+func TestDirMemoryWriter_ConcurrentSessions(t *testing.T) {
+	dir := t.TempDir()
+
+	w, err := NewDirMemoryWriter(dir, "{token_hash}.md")
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	done := make(chan error, 20)
+	sessions := []string{
+		"aaaa1111bbbb2222cccc3333",
+		"dddd4444eeee5555ffff6666",
+	}
+
+	for _, s := range sessions {
+		for i := 0; i < 10; i++ {
+			s := s
+			go func() {
+				done <- w.Append(s, "user", "gpt-4", "message")
+			}()
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("concurrent append failed: %v", err)
+		}
+	}
+
+	// Each session file should have 10 entries
+	for _, s := range sessions {
+		prefix := safeSessionPrefix(s, 16)
+		data, err := os.ReadFile(filepath.Join(dir, prefix+".md"))
+		if err != nil {
+			t.Fatalf("read file for %s: %v", prefix, err)
+		}
+		count := strings.Count(string(data), "---")
+		if count != 10 {
+			t.Errorf("session %s: expected 10 entries, found %d", prefix, count)
+		}
+	}
+}
+
+func TestSafeSessionPrefix(t *testing.T) {
+	if got := safeSessionPrefix("abcdefghijklmnop", 16); got != "abcdefghijklmnop" {
+		t.Errorf("expected exact 16 chars, got %q", got)
+	}
+	if got := safeSessionPrefix("short", 16); got != "short" {
+		t.Errorf("expected full string for short input, got %q", got)
+	}
+	if got := safeSessionPrefix("abcdefghijklmnopqrstuvwxyz", 16); got != "abcdefghijklmnop" {
+		t.Errorf("expected truncated to 16, got %q", got)
+	}
+}
+
 func TestFileMemoryWriter_ConcurrentWrites(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "concurrent.md")

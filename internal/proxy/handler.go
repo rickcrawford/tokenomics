@@ -111,6 +111,8 @@ func (h *Handler) SetRedisMemoryWriter(w session.MemoryWriter) {
 
 // getMemoryWriter returns the appropriate memory writer for the given config.
 // Returns nil if memory is disabled.
+// When FileName is set, file_path is treated as a directory and each session
+// gets its own file based on the name pattern. Otherwise file_path is a single file.
 func (h *Handler) getMemoryWriter(mc policy.MemoryConfig) session.MemoryWriter {
 	if !mc.Enabled {
 		return nil
@@ -120,6 +122,22 @@ func (h *Handler) getMemoryWriter(mc policy.MemoryConfig) session.MemoryWriter {
 	defer h.memWriterMu.Unlock()
 
 	if mc.FilePath != "" {
+		// Per-session files: file_path is a directory, file_name is the pattern
+		if mc.FileName != "" {
+			key := mc.FilePath + ":" + mc.FileName
+			if w, ok := h.memWriters[key]; ok {
+				return w
+			}
+			w, err := session.NewDirMemoryWriter(mc.FilePath, mc.FileName)
+			if err != nil {
+				log.Printf("[memory] failed to create dir writer for %q: %v", mc.FilePath, err)
+				return nil
+			}
+			h.memWriters[key] = w
+			return w
+		}
+
+		// Legacy single-file mode
 		if w, ok := h.memWriters[mc.FilePath]; ok {
 			return w
 		}

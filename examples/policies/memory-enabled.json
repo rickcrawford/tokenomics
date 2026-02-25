@@ -15,7 +15,8 @@
   },
   "memory": {
     "enabled": true,
-    "file_path": "./memory/sessions.md"
+    "file_path": "./memory",
+    "file_name": "{token_hash}.md"
   },
   "metadata": {
     "team": "engineering",

@@ -64,7 +64,8 @@ A policy is a JSON object passed to `token create --policy`:
   },
   "memory": {
     "enabled": true,
-    "file_path": "/var/log/tokenomics/sessions.md"
+    "file_path": "/var/log/tokenomics/memory",
+    "file_name": "{token_hash}.md"
   }
 }
 ```
@@ -407,9 +408,32 @@ Use `client_request_id` to correlate Tokenomics logs with the provider's logs wh
 
 The `memory` field enables conversation logging for the token.
 
-### File-based memory
+### Per-session files (recommended)
 
-Append markdown-formatted entries to a file during the session:
+Write each session to its own file using `file_path` (directory) and `file_name` (pattern):
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "file_path": "/var/log/tokenomics/memory",
+    "file_name": "{token_hash}.md"
+  }
+}
+```
+
+This creates one file per token, e.g. `/var/log/tokenomics/memory/a1b2c3d4e5f6a1b2.md`.
+
+| Placeholder | Replaced with |
+|-------------|---------------|
+| `{token_hash}` | First 16 characters of the token's HMAC hash |
+| `{date}` | Current UTC date as `YYYY-MM-DD` |
+
+Patterns can include subdirectories. For example, `{date}/{token_hash}.md` creates daily directories with per-token files.
+
+### Single-file memory (legacy)
+
+Append all sessions to one file by setting `file_path` without `file_name`:
 
 ```json
 {
@@ -420,15 +444,19 @@ Append markdown-formatted entries to a file during the session:
 }
 ```
 
+### Entry format
+
 Each entry is formatted as:
 
 ```
-## <timestamp> | <session_id> | <role> | <model>
+## <timestamp> | <token_hash_prefix> | <role> | <model>
 
 <content>
 
 ---
 ```
+
+See `examples/memory-sample.md` for a full sample output.
 
 ### Redis-based memory
 
@@ -506,7 +534,8 @@ When a request comes in for `claude-3-opus`, the proxy matches the Anthropic pro
   ],
   "memory": {
     "enabled": true,
-    "file_path": "/var/log/tokenomics/audit.md"
+    "file_path": "/var/log/tokenomics/audit",
+    "file_name": "{token_hash}.md"
   }
 }
 ```
@@ -593,7 +622,8 @@ If a request to `gpt-4o` fails with a 429 or 5xx, the proxy retries up to 2 time
   },
   "memory": {
     "enabled": true,
-    "file_path": "/var/log/tokenomics/support.md"
+    "file_path": "/var/log/tokenomics/support",
+    "file_name": "{date}/{token_hash}.md"
   },
   "providers": {
     "openai": [
