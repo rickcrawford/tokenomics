@@ -1,0 +1,8 @@
+# Claude Code user-specific files
+settings.json
+projects/
+todos/
+*.jsonl
+
+# Keep skills/ tracked
+!skills/
