@@ -21,6 +21,8 @@ var remoteCmd = &cobra.Command{
 	Short: "Start the central config server for remote token syncing",
 	Long: `Runs a lightweight HTTP server that serves tokens over a REST API.
 Proxy instances configured with a remote URL will fetch tokens from this server.`,
+	Example: `  tokenomics remote
+  tokenomics remote --addr :9090 --api-key mysecret`,
 	RunE: runRemote,
 }
 

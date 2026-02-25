@@ -22,6 +22,10 @@ var initCmd = &cobra.Command{
 	Long: `Sets environment variables or writes config for an agent framework
 (OpenAI, Anthropic, Azure, Gemini, or custom) to route API calls through the proxy.
 Can optionally start the proxy in the background.`,
+	Example: `  eval $(tokenomics init --token tkn_abc123)
+  tokenomics init --token tkn_abc123 --provider anthropic --output dotenv
+  tokenomics init --token tkn_abc123 --output json
+  tokenomics init --proxy-url https://proxy.company.com:8443 --token tkn_abc123`,
 	RunE: runInit,
 }
 

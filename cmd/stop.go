@@ -16,6 +16,8 @@ var stopCmd = &cobra.Command{
 	Short: "Stop the background tokenomics proxy",
 	Long: `Stops the background proxy process started by 'tokenomics init --start'.
 Sends SIGTERM, then SIGKILL if needed.`,
+	Example: `  tokenomics stop
+  tokenomics stop --pid-file /tmp/tokenomics.pid`,
 	RunE: runStop,
 }
 

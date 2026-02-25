@@ -20,36 +20,46 @@ import (
 var tokenCmd = &cobra.Command{
 	Use:   "token",
 	Short: "Manage wrapper tokens",
+	Long:  `Create, inspect, update, and delete wrapper tokens and their associated policies.`,
 }
 
 var tokenCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new wrapper token",
-	RunE:  runTokenCreate,
+	Example: `  tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY","max_tokens":100000}'
+  tokenomics token create --policy '{"base_key_env":"ANTHROPIC_API_KEY"}' --expires 30d
+  tokenomics token create --policy @policy.json --expires 2025-12-31T00:00:00Z`,
+	RunE: runTokenCreate,
 }
 
 var tokenGetCmd = &cobra.Command{
-	Use:   "get",
-	Short: "Get a token's details by hash",
-	RunE:  runTokenGet,
+	Use:     "get",
+	Short:   "Get a token's details by hash",
+	Example: `  tokenomics token get --hash 9f86d0818...`,
+	RunE:    runTokenGet,
 }
 
 var tokenUpdateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update a token's policy or expiration",
-	RunE:  runTokenUpdate,
+	Example: `  tokenomics token update --hash 9f86d0818... --expires 7d
+  tokenomics token update --hash 9f86d0818... --policy '{"max_tokens":200000}'
+  tokenomics token update --hash 9f86d0818... --expires clear`,
+	RunE: runTokenUpdate,
 }
 
 var tokenDeleteCmd = &cobra.Command{
-	Use:   "delete",
-	Short: "Delete a wrapper token",
-	RunE:  runTokenDelete,
+	Use:     "delete",
+	Short:   "Delete a wrapper token",
+	Example: `  tokenomics token delete --hash 9f86d0818...`,
+	RunE:    runTokenDelete,
 }
 
 var tokenListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all wrapper tokens and their policies",
-	RunE:  runTokenList,
+	Use:     "list",
+	Short:   "List all wrapper tokens and their policies",
+	Example: `  tokenomics token list`,
+	RunE:    runTokenList,
 }
 
 var (

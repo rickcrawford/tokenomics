@@ -27,7 +27,10 @@ import (
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the reverse proxy server",
-	RunE:  runServe,
+	Example: `  tokenomics serve
+  tokenomics serve --config /etc/tokenomics/config.yaml
+  tokenomics serve --db /tmp/test.db`,
+	RunE: runServe,
 }
 
 func init() {
