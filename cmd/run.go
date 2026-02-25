@@ -20,6 +20,9 @@ var runCmd = &cobra.Command{
 with environment variables configured to use the proxy. The proxy is automatically
 shut down when the command exits.
 
+If --proxy-url or $TOKENOMICS_PROXY_URL is set, uses a remote proxy instead
+of starting a local one.
+
 Usage:
   tokenomics run [flags] COMMAND [ARGS...]
 
@@ -28,12 +31,15 @@ The -- separator is optional. Use it only if your command has flags that conflic
 Examples:
   tokenomics run claude "What is AI?"
   tokenomics run --provider anthropic -- python my_script.py
-  TOKENOMICS_KEY=tkn_abc123 tokenomics run claude`,
+  TOKENOMICS_KEY=tkn_abc123 tokenomics run claude
+  TOKENOMICS_PROXY_URL=https://proxy.example.com:8443 tokenomics run claude "test"
+  tokenomics run --proxy-url https://proxy.company.com claude "test"`,
 	RunE: runRun,
 }
 
 var (
 	runToken    string
+	runProxyURL string
 	runHost     string
 	runPort     int
 	runTLS      bool
@@ -45,9 +51,10 @@ var (
 
 func init() {
 	runCmd.Flags().StringVar(&runToken, "token", "", "wrapper token (read from $TOKENOMICS_KEY if not provided)")
-	runCmd.Flags().StringVar(&runHost, "host", "localhost", "proxy hostname")
-	runCmd.Flags().IntVar(&runPort, "port", 8443, "proxy port")
-	runCmd.Flags().BoolVar(&runTLS, "tls", true, "use HTTPS")
+	runCmd.Flags().StringVar(&runProxyURL, "proxy-url", "", "remote proxy URL (read from $TOKENOMICS_PROXY_URL if not provided; if set, uses remote proxy instead of starting local)")
+	runCmd.Flags().StringVar(&runHost, "host", "localhost", "proxy hostname (only used if starting local proxy)")
+	runCmd.Flags().IntVar(&runPort, "port", 8443, "proxy port (only used if starting local proxy)")
+	runCmd.Flags().BoolVar(&runTLS, "tls", true, "use HTTPS (only used if starting local proxy)")
 	runCmd.Flags().BoolVar(&runInsecure, "insecure", false, "skip TLS verification (not recommended; install valid certificates instead)")
 	runCmd.Flags().StringVar(&runProvider, "provider", "generic", "target provider (generic, anthropic, azure, gemini, custom)")
 	runCmd.Flags().StringVar(&runEnvKey, "env-key", "", "custom env var name for the API key")
@@ -84,6 +91,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no token provided: use --token flag or set $TOKENOMICS_KEY")
 	}
 
+	// Read proxy URL from env var if not provided
+	if runProxyURL == "" {
+		runProxyURL = os.Getenv("TOKENOMICS_PROXY_URL")
+	}
+
 	// Auto-detect provider from CLI name if not explicitly set
 	if runProvider == "generic" {
 		cliName := args[0]
@@ -92,18 +104,24 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Start serve process in background
-	serveCmd := exec.Command(os.Args[0], "serve", "--config", cfgFile, "--db", dbPath)
-	serveCmd.Stdout = os.Stderr
-	serveCmd.Stderr = os.Stderr
+	var serveCmd *exec.Cmd
 
-	if err := serveCmd.Start(); err != nil {
-		return fmt.Errorf("start proxy: %w", err)
+	// If proxy URL is provided, use remote proxy; otherwise start local proxy
+	baseURL := runProxyURL
+	if baseURL == "" {
+		// Start serve process in background
+		serveCmd = exec.Command(os.Args[0], "serve", "--config", cfgFile, "--db", dbPath)
+		serveCmd.Stdout = os.Stderr
+		serveCmd.Stderr = os.Stderr
+
+		if err := serveCmd.Start(); err != nil {
+			return fmt.Errorf("start proxy: %w", err)
+		}
 	}
 
-	// Cleanup function to ensure proxy is shut down
+	// Cleanup function to ensure local proxy is shut down (no-op if using remote)
 	defer func() {
-		if serveCmd.Process != nil {
+		if serveCmd != nil && serveCmd.Process != nil {
 			serveCmd.Process.Signal(syscall.SIGINT)
 			serveCmd.Wait()
 		}
@@ -114,7 +132,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if !runTLS {
 		scheme = "http"
 	}
-	healthURL := fmt.Sprintf("%s://%s:%d/ping", scheme, runHost, runPort)
+
+	// If no proxy URL provided, construct it from host/port
+	if runProxyURL == "" {
+		baseURL = fmt.Sprintf("%s://%s:%d", scheme, runHost, runPort)
+	}
+
+	healthURL := fmt.Sprintf("%s/ping", baseURL)
 
 	// Create HTTP client with optional TLS skip
 	client := &http.Client{
@@ -146,7 +170,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build environment variables for the proxy
-	baseURL := fmt.Sprintf("%s://%s:%d", scheme, runHost, runPort)
 	pairs := ResolveEnvPairs(runProvider, runToken, baseURL, runEnvKey, runEnvBase)
 
 	if runInsecure {

@@ -79,6 +79,32 @@ TOKENOMICS_KEY=tkn_test tokenomics run node app.js
 
 # With explicit host/port
 TOKENOMICS_KEY=tkn_test tokenomics run --host proxy.example.com --port 9000 -- python script.py
+
+# Using a remote proxy (uses shared proxy instead of local)
+TOKENOMICS_KEY=tkn_test tokenomics run --proxy-url https://proxy.company.com:8443 claude "test"
+```
+
+### Remote Proxy Configuration
+
+You can use a remote Tokenomics proxy instead of starting a local one. This is useful when:
+- Running on multiple machines that share a central proxy
+- Using a managed Tokenomics service
+- Testing against a shared staging proxy
+
+Set either:
+- **Environment variable:** `TOKENOMICS_PROXY_URL=https://proxy.example.com:8443`
+- **Command-line flag:** `--proxy-url https://proxy.example.com:8443`
+
+When a proxy URL is provided, the `--host`, `--port`, `--tls`, and `--start` flags are ignored (they only apply to local proxy startup).
+
+```bash
+# Using environment variable
+export TOKENOMICS_PROXY_URL="https://shared-proxy.company.com:8443"
+export TOKENOMICS_KEY="tkn_my-wrapper-token"
+tokenomics run claude "test"
+
+# Using flag (overrides env var)
+tokenomics run --proxy-url https://other-proxy.com:8443 claude "test"
 ```
 
 ### `tokenomics run` Flags
@@ -86,10 +112,11 @@ TOKENOMICS_KEY=tkn_test tokenomics run --host proxy.example.com --port 9000 -- p
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--token` | `$TOKENOMICS_KEY` | The wrapper token (reads from env var if not provided) |
+| `--proxy-url` | `$TOKENOMICS_PROXY_URL` | Remote proxy URL (if set, uses remote proxy instead of starting local) |
 | `--provider` | (auto-detected) | Override provider: `generic`, `anthropic`, `azure`, `gemini` |
-| `--host` | `localhost` | Proxy hostname |
-| `--port` | `8443` | Proxy port |
-| `--tls` | `true` | Use HTTPS scheme |
+| `--host` | `localhost` | Proxy hostname (only used if starting local proxy) |
+| `--port` | `8443` | Proxy port (only used if starting local proxy) |
+| `--tls` | `true` | Use HTTPS scheme (only used if starting local proxy) |
 | `--insecure` | `false` | Skip TLS verification (not recommended; install CA cert instead) |
 
 ## Manual Mode: `tokenomics init`
@@ -112,16 +139,35 @@ tokenomics stop                    # Stop proxy when done
 
 This is more efficient than `tokenomics run` for multiple commands since you only start/stop the proxy once.
 
+### Using Remote Proxy with `init`
+
+You can also use a remote proxy with `init`. It will skip the daemon startup and just configure environment variables:
+
+```bash
+# Use shared remote proxy for multiple commands
+export TOKENOMICS_KEY="tkn_my-wrapper-token"
+export TOKENOMICS_PROXY_URL="https://proxy.company.com:8443"
+tokenomics init --provider anthropic --output shell
+
+# Now run multiple commands through the remote proxy
+eval "$(tokenomics init --provider anthropic --output shell)"
+claude "prompt 1"
+python script.py
+node app.js
+```
+
 ### `tokenomics init` Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--token` | `$TOKENOMICS_KEY` | The wrapper token |
+| `--proxy-url` | `$TOKENOMICS_PROXY_URL` | Remote proxy URL (if set, uses remote proxy instead of starting daemon) |
 | `--provider` | `generic` | Target provider: `generic`, `anthropic`, `azure`, `gemini` |
-| `--host` | `localhost` | Proxy hostname |
-| `--port` | `8443` | Proxy port |
-| `--tls` | `true` | Use HTTPS scheme |
+| `--host` | `localhost` | Proxy hostname (only used if starting local proxy) |
+| `--port` | `8443` | Proxy port (only used if starting local proxy) |
+| `--tls` | `true` | Use HTTPS scheme (only used if starting local proxy) |
 | `--insecure` | `false` | Skip TLS verification (not recommended; install CA cert instead) |
+| `--start` | `true` | Start proxy in background (only used if proxy-url not set) |
 | `--output` | `shell` | Output format: `shell`, `dotenv`, `json` |
 | `--dotenv` | (empty) | Path to .env file (used with `--output dotenv`) |
 

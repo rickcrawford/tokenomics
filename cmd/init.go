@@ -27,6 +27,7 @@ Can optionally start the proxy in the background.`,
 
 var (
 	initToken     string
+	initProxyURL  string
 	initHost      string
 	initPort      int
 	initTLS       bool
@@ -43,9 +44,10 @@ var (
 
 func init() {
 	initCmd.Flags().StringVar(&initToken, "token", "", "wrapper token (read from $TOKENOMICS_KEY if not provided)")
-	initCmd.Flags().StringVar(&initHost, "host", "localhost", "proxy hostname")
-	initCmd.Flags().IntVar(&initPort, "port", 8443, "proxy port")
-	initCmd.Flags().BoolVar(&initTLS, "tls", true, "use HTTPS")
+	initCmd.Flags().StringVar(&initProxyURL, "proxy-url", "", "remote proxy URL (read from $TOKENOMICS_PROXY_URL if not provided; if set, uses remote proxy instead of starting local)")
+	initCmd.Flags().StringVar(&initHost, "host", "localhost", "proxy hostname (only used if starting local proxy)")
+	initCmd.Flags().IntVar(&initPort, "port", 8443, "proxy port (only used if starting local proxy)")
+	initCmd.Flags().BoolVar(&initTLS, "tls", true, "use HTTPS (only used if starting local proxy)")
 	initCmd.Flags().BoolVar(&initInsecure, "insecure", false, "skip TLS verification (not recommended; install valid certificates instead)")
 	initCmd.Flags().StringVar(&initProvider, "provider", "generic", "target provider (generic, anthropic, azure, gemini, custom)")
 	initCmd.Flags().StringVar(&initEnvKey, "env-key", "", "custom env var name for the API key")
@@ -74,16 +76,29 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no token provided: use --token flag or set $TOKENOMICS_KEY")
 	}
 
-	scheme := "https"
-	if !initTLS {
-		scheme = "http"
+	// Read proxy URL from env var if not provided
+	if initProxyURL == "" {
+		initProxyURL = os.Getenv("TOKENOMICS_PROXY_URL")
 	}
-	baseURL := fmt.Sprintf("%s://%s:%d", scheme, initHost, initPort)
 
-	// Start the proxy daemon (enabled by default for convenience)
-	if initStart {
-		if err := startProxyDaemon(baseURL); err != nil {
-			return err
+	// Determine base URL
+	var baseURL string
+	if initProxyURL != "" {
+		// Use remote proxy
+		baseURL = initProxyURL
+	} else {
+		// Use local proxy
+		scheme := "https"
+		if !initTLS {
+			scheme = "http"
+		}
+		baseURL = fmt.Sprintf("%s://%s:%d", scheme, initHost, initPort)
+
+		// Start the proxy daemon (enabled by default for convenience)
+		if initStart {
+			if err := startProxyDaemon(baseURL); err != nil {
+				return err
+			}
 		}
 	}
 
