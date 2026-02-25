@@ -33,6 +33,29 @@ Today, token usage lives only in-memory (`/stats` endpoint) or in stdout JSON lo
 
 ## Data Model
 
+### Per-Request Entry
+
+Each proxied request captures the full context the proxy already tracks in `RequestLog` (logging.go) and `UsageStats` (stats.go). One proxy session can serve multiple tokens, so `token_hash` is on every entry.
+
+| Field | Source | Purpose |
+|-------|--------|---------|
+| `timestamp` | Request start time | When |
+| `token_hash` | HMAC-SHA256 of wrapper token | Which token (enables per-token rollups, multi-token sessions) |
+| `model` | `reqBody["model"]` | Which model was requested |
+| `provider` | `resolved.BaseKeyEnv` | Which provider API key was used (maps to provider for cost correlation) |
+| `input_tokens` | tiktoken count | Input consumption |
+| `output_tokens` | Response usage or delta count | Output consumption |
+| `duration_ms` | `time.Since(start)` | Latency |
+| `status_code` | Upstream response code | Success/failure |
+| `stream` | `reqBody["stream"]` | Streaming vs buffered |
+| `error` | Error message if any | What went wrong |
+| `upstream_id` | Response body `id` field | Provider's completion ID (chatcmpl-*, msg_*) for billing correlation |
+| `upstream_request_id` | Response headers | Provider's request correlation ID |
+| `retry_count` | Retry loop counter | Wasted attempts (tokens burned on retries) |
+| `fallback_model` | Fallback model used | When primary model failed |
+| `rule_matches` | Content rule engine | Security/compliance events (warn, log, mask actions) |
+| `metadata` | Policy tags | Team, cost_center, project labels from token policy |
+
 ### Session Summary (`sessions/<date>_<id>.json`)
 
 ```json
@@ -52,7 +75,10 @@ Today, token usage lives only in-memory (`/stats` endpoint) or in stdout JSON lo
     "input_tokens": 125000,
     "output_tokens": 89000,
     "total_tokens": 214000,
-    "error_count": 2
+    "error_count": 2,
+    "retry_count": 3,
+    "rule_violation_count": 1,
+    "rate_limit_count": 0
   },
   "by_model": {
     "claude-sonnet-4-20250514": {
@@ -68,32 +94,88 @@ Today, token usage lives only in-memory (`/stats` endpoint) or in stdout JSON lo
       "total_tokens": 74000
     }
   },
+  "by_provider": {
+    "ANTHROPIC_API_KEY": {
+      "request_count": 30,
+      "input_tokens": 80000,
+      "output_tokens": 60000,
+      "total_tokens": 140000
+    },
+    "OPENAI_API_KEY": {
+      "request_count": 15,
+      "input_tokens": 45000,
+      "output_tokens": 29000,
+      "total_tokens": 74000
+    }
+  },
+  "by_token": {
+    "a1b2c3d4e5f6g7h8": {
+      "request_count": 40,
+      "input_tokens": 110000,
+      "output_tokens": 78000,
+      "total_tokens": 188000,
+      "models_used": ["claude-sonnet-4-20250514", "gpt-4o"],
+      "first_seen": "2026-02-25T10:30:05Z",
+      "last_seen": "2026-02-25T11:44:00Z"
+    },
+    "h8g7f6e5d4c3b2a1": {
+      "request_count": 5,
+      "input_tokens": 15000,
+      "output_tokens": 11000,
+      "total_tokens": 26000,
+      "models_used": ["gpt-4o"],
+      "first_seen": "2026-02-25T11:00:00Z",
+      "last_seen": "2026-02-25T11:20:00Z"
+    }
+  },
   "requests": [
     {
       "timestamp": "2026-02-25T10:30:05Z",
+      "token_hash": "a1b2c3d4e5f6g7h8",
       "model": "claude-sonnet-4-20250514",
+      "provider": "ANTHROPIC_API_KEY",
       "input_tokens": 1500,
       "output_tokens": 800,
       "duration_ms": 3200,
       "status_code": 200,
       "stream": true,
-      "upstream_id": "msg_abc123"
+      "upstream_id": "msg_abc123",
+      "upstream_request_id": "req_def456"
+    },
+    {
+      "timestamp": "2026-02-25T10:35:12Z",
+      "token_hash": "a1b2c3d4e5f6g7h8",
+      "model": "gpt-4o",
+      "provider": "OPENAI_API_KEY",
+      "input_tokens": 2000,
+      "output_tokens": 1200,
+      "duration_ms": 4100,
+      "status_code": 200,
+      "stream": true,
+      "upstream_id": "chatcmpl-xyz789",
+      "retry_count": 1,
+      "fallback_model": "gpt-4o",
+      "rule_matches": [{"action": "warn", "message": "keyword match: TODO"}],
+      "metadata": {"team": "platform"}
     }
-  ],
-  "metadata": {
-    "team": "platform",
-    "cost_center": "engineering"
-  }
+  ]
 }
 ```
 
 **Design decisions:**
 
-- `requests` array captures every proxied call with enough detail for debugging without storing full bodies.
+- `token_hash` on every request. One proxy session serves multiple tokens. This enables per-token rollups and multi-token attribution.
+- `provider` (`base_key_env`) on every request. Different providers have different pricing. Downstream analytics needs this to join with cost tables.
+- `by_model`, `by_provider`, and `by_token` rollups are computed at `Close()` time. Three dimensions to slice: what model, which provider API key, which wrapper token.
+- `by_token` includes `models_used` and time range per token, mirroring what `UsageStats.SessionEntry` already tracks in memory.
+- `retry_count` and `fallback_model` expose wasted work. Retries burn tokens on attempts that failed.
+- `upstream_id` and `upstream_request_id` enable correlation with provider billing dashboards and dispute resolution.
+- `rule_matches` captures security/compliance events without blocking the request (warn/log/mask actions). Violations that blocked requests show as errors.
+- `error` field on requests captures the failure reason, not just the status code.
+- `metadata` from the token's policy flows through to each request, enabling team/project/cost-center attribution.
+- `totals` includes `retry_count`, `rule_violation_count`, `rate_limit_count` as session-level signals for operational health.
 - `git.commit_start` is HEAD when the proxy starts. `git.commit_end` is HEAD when it stops. This brackets what code was being worked on.
-- `by_model` rollup enables quick per-model token breakdowns.
-- `metadata` is carried from the token's policy, enabling team/project tagging.
-- No pricing or cost fields. Downstream analytics can join model + token counts with current pricing at query time.
+- No pricing or cost fields. Downstream analytics can join `provider + model + token counts` with current pricing at query time.
 
 ### Session Memory (`memory/<date>_<id>.md`)
 
@@ -140,14 +222,14 @@ type Ledger struct {
 func Open(dir string) (*Ledger, error)           // create dirs, snapshot git
 func (l *Ledger) RecordRequest(entry RequestEntry) // append to session
 func (l *Ledger) RecordMemory(tokenHash, role, model, content string) error
-func (l *Ledger) Close() error                    // snapshot git end, compute costs, write JSON
+func (l *Ledger) Close() error                    // snapshot git end, compute rollups, write JSON
 ```
 
 **Key behaviors:**
 
 - `Open()` creates `.tokenomics/sessions/` and `.tokenomics/memory/` directories if missing. Captures `git.commit_start` and `git.branch`.
 - `RecordRequest()` is called from the proxy after each completed request. Thread-safe. Appends to an in-memory list.
-- `Close()` captures `git.commit_end`, computes `by_model` rollups, writes the session JSON file, and closes the memory writer.
+- `Close()` captures `git.commit_end`, computes `by_model`, `by_provider`, and `by_token` rollups, writes the session JSON file, and closes the memory writer.
 - If the `.tokenomics/` directory does not exist and ledger is enabled, it gets created with a brief `README` explaining the folder.
 
 ### Phase 2: Config Integration
@@ -212,18 +294,27 @@ Add `ledger *ledger.Ledger` field to `Handler`. After each `request.completed` e
 ```go
 if h.ledger != nil {
     h.ledger.RecordRequest(ledger.RequestEntry{
-        Timestamp:    time.Now().UTC(),
-        Model:        model,
-        InputTokens:  inputTokens,
-        OutputTokens: outputTokens,
-        DurationMs:   elapsed.Milliseconds(),
-        StatusCode:   statusCode,
-        Stream:       isStream,
-        UpstreamID:   upstreamID,
-        TokenHash:    safePrefix(tokenHash, 16),
+        Timestamp:          time.Now().UTC(),
+        TokenHash:          safePrefix(tokenHash, 16),
+        Model:              tryModel,
+        Provider:           resolved.BaseKeyEnv,
+        InputTokens:        inputTokens,
+        OutputTokens:       outputTokens,
+        DurationMs:         elapsed.Milliseconds(),
+        StatusCode:         resp.StatusCode,
+        Stream:             stream,
+        Error:              logEntry.Error,
+        UpstreamID:         logEntry.UpstreamID,
+        UpstreamRequestID:  logEntry.UpstreamRequestID,
+        RetryCount:         retryCount,
+        FallbackModel:      logEntry.FallbackModel,
+        RuleMatches:        logEntry.RuleMatches,
+        Metadata:           resolved.Metadata,
     })
 }
 ```
+
+The `RequestEntry` struct mirrors `RequestLog` from logging.go. We capture the same data the structured logs already emit, but persist it to disk.
 
 For memory recording, when the existing memory writer fires, also write to the ledger's memory writer if enabled:
 
@@ -242,6 +333,8 @@ if h.ledger != nil {
 | `tokenomics ledger summary` | Print totals across all sessions in `.tokenomics/` |
 | `tokenomics ledger summary --by-branch` | Aggregate and group by git branch |
 | `tokenomics ledger summary --by-model` | Aggregate and group by model |
+| `tokenomics ledger summary --by-provider` | Aggregate and group by provider (base_key_env) |
+| `tokenomics ledger summary --by-token` | Aggregate and group by wrapper token hash |
 | `tokenomics ledger summary --branch <name>` | Filter to a specific branch |
 | `tokenomics ledger summary --since 2026-02-01` | Filter by date range |
 | `tokenomics ledger sessions` | List all recorded sessions |
@@ -270,6 +363,26 @@ gpt-4o-mini                       24        75,000         38,000       113,000
 TOTAL                            199       695,000        438,000     1,133,000
 ```
 
+**Example output for `tokenomics ledger summary --by-provider`:**
+
+```
+Provider              Requests  Input Tokens  Output Tokens  Total Tokens
+ANTHROPIC_API_KEY          120       400,000        250,000       650,000
+OPENAI_API_KEY              79       295,000        188,000       483,000
+
+TOTAL                      199       695,000        438,000     1,133,000
+```
+
+**Example output for `tokenomics ledger summary --by-token`:**
+
+```
+Token Hash        Requests  Input Tokens  Output Tokens  Total Tokens  Models Used
+a1b2c3d4e5f6g7h8      150       550,000        350,000       900,000  claude-sonnet-4-20250514, gpt-4o
+h8g7f6e5d4c3b2a1       49       145,000         88,000       233,000  gpt-4o-mini
+
+TOTAL                  199       695,000        438,000     1,133,000
+```
+
 ### Phase 5: Documentation
 
 | File | Changes |
@@ -295,24 +408,36 @@ TOTAL                            199       695,000        438,000     1,133,000
             +-------------+-------------+
             |                           |
       RecordRequest()            RecordMemory()
+      (mirrors RequestLog)       (reuses DirMemoryWriter)
             |                           |
     +-------v--------+          +-------v--------+
     | sessions/*.json |          | memory/*.md    |
     +-----------------+          +----------------+
             |
-      Close() -> write summary with by_model rollups
+      Close() -> compute rollups:
+            |     by_model    (what model)
+            |     by_provider (which API key)
+            |     by_token    (which wrapper token)
+            |
+    +-------v--------+
+    | Write JSON     |
+    +----------------+
 
 
     CLI reads .tokenomics/ directly:
 
-    +------------------+
-    | ledger summary   |----> reads sessions/*.json, aggregates tokens
-    | ledger sessions  |----> lists sessions/*.json
-    | ledger show <id> |----> reads one session file
-    +------------------+
+    +-------------------------------+
+    | ledger summary                |----> totals across all sessions
+    | ledger summary --by-branch    |----> group by git branch
+    | ledger summary --by-model     |----> group by model
+    | ledger summary --by-provider  |----> group by provider API key
+    | ledger summary --by-token     |----> group by wrapper token
+    | ledger sessions               |----> list sessions
+    | ledger show <id>              |----> one session detail
+    +-------------------------------+
 
     Downstream analytics (database, dashboard, etc.)
-    joins session data with current model pricing at query time.
+    joins provider + model + token counts with current pricing at query time.
 ```
 
 ## Files Changed
