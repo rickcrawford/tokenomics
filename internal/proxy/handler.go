@@ -15,6 +15,7 @@ import (
 
 	"github.com/rickcrawford/tokenomics/internal/config"
 	"github.com/rickcrawford/tokenomics/internal/events"
+	"github.com/rickcrawford/tokenomics/internal/ledger"
 	"github.com/rickcrawford/tokenomics/internal/policy"
 	"github.com/rickcrawford/tokenomics/internal/session"
 	"github.com/rickcrawford/tokenomics/internal/store"
@@ -50,6 +51,7 @@ type Handler struct {
 	upstreamURL string
 	providers   map[string]config.ProviderConfig
 	logging     config.LoggingConfig
+	ledger      *ledger.Ledger
 
 	memWriterMu    sync.Mutex
 	memWriters     map[string]session.MemoryWriter
@@ -79,6 +81,11 @@ func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstream
 // SetLogging configures logging behavior from the config.
 func (h *Handler) SetLogging(cfg config.LoggingConfig) {
 	h.logging = cfg
+}
+
+// SetLedger configures the session ledger for token usage tracking.
+func (h *Handler) SetLedger(l *ledger.Ledger) {
+	h.ledger = l
 }
 
 // logHash returns a display-safe hash prefix, respecting the hide_token_hash config.

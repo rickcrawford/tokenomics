@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rickcrawford/tokenomics/internal/config"
 	"github.com/rickcrawford/tokenomics/internal/events"
+	"github.com/rickcrawford/tokenomics/internal/ledger"
 	"github.com/rickcrawford/tokenomics/internal/proxy"
 	"github.com/rickcrawford/tokenomics/internal/remote"
 	"github.com/rickcrawford/tokenomics/internal/session"
@@ -122,12 +123,32 @@ func runServe(cmd *cobra.Command, args []string) error {
 		sessStore = session.NewMemoryStore()
 	}
 
+	// Init session ledger (if enabled)
+	var sessionLedger *ledger.Ledger
+	if cfg.Ledger.Enabled {
+		l, err := ledger.Open(cfg.Ledger.Dir, cfg.Ledger.Memory)
+		if err != nil {
+			log.Printf("Warning: could not open ledger: %v (continuing without ledger)", err)
+		} else {
+			sessionLedger = l
+			defer func() {
+				if err := sessionLedger.Close(); err != nil {
+					log.Printf("Warning: ledger close error: %v", err)
+				}
+			}()
+			log.Printf("Session ledger enabled (dir=%s, session=%s)", cfg.Ledger.Dir, l.SessionID())
+		}
+	}
+
 	// Get hash key
 	hashKey := getHashKey(cfg.Security.HashKeyEnv)
 
 	// Create proxy handler with provider configs and event emitter
 	handler := proxy.NewHandler(tokenStore, sessStore, hashKey, cfg.Server.UpstreamURL, cfg.Providers, emitter)
 	handler.SetLogging(cfg.Logging)
+	if sessionLedger != nil {
+		handler.SetLedger(sessionLedger)
+	}
 
 	// Wire up Redis memory writer if Redis session backend is configured
 	if rs, ok := sessStore.(*session.RedisStore); ok {

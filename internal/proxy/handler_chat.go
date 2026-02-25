@@ -16,6 +16,7 @@ import (
 
 	"github.com/rickcrawford/tokenomics/internal/config"
 	"github.com/rickcrawford/tokenomics/internal/events"
+	"github.com/rickcrawford/tokenomics/internal/ledger"
 	"github.com/rickcrawford/tokenomics/internal/policy"
 	"github.com/rickcrawford/tokenomics/internal/tokencount"
 )
@@ -400,7 +401,7 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			}
 
 			if stream && resp.StatusCode == http.StatusOK {
-				outputTokens, assistantContent, streamUpstreamID := h.handleStreamingResponse(w, resp, tokenHash, tryModel)
+				outputTokens, assistantContent, streamUpstreamID, streamLastChunk := h.handleStreamingResponse(w, resp, tokenHash, tryModel)
 				resp.Body.Close()
 				logEntry.StatusCode = resp.StatusCode
 				logEntry.OutputTokens = outputTokens
@@ -418,6 +419,19 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 					}
 					if assistantContent != "" {
 						memWriter.Append(tokenHash, "assistant", tryModel, assistantContent)
+					}
+				}
+
+				// Record to ledger
+				h.recordLedgerEntry(logEntry, tokenHash, tryModel, resolved.ProviderName,
+					inputTokens, outputTokens, resp.StatusCode, stream, retryCount,
+					extractProviderMetaFromStream(resp.Header, streamLastChunk))
+				if h.ledger != nil {
+					if userContent != "" {
+						h.ledger.RecordMemory(tokenHash, "user", tryModel, userContent)
+					}
+					if assistantContent != "" {
+						h.ledger.RecordMemory(tokenHash, "assistant", tryModel, assistantContent)
 					}
 				}
 				return
@@ -448,15 +462,32 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				"error": isError,
 			}))
 
+			var assistantContent string
 			if !isError {
 				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
 					if userContent != "" {
 						memWriter.Append(tokenHash, "user", tryModel, userContent)
 					}
-					assistantContent := extractAssistantContent(respBody)
+					assistantContent = extractAssistantContent(respBody)
 					if assistantContent != "" {
 						memWriter.Append(tokenHash, "assistant", tryModel, assistantContent)
 					}
+				}
+			}
+
+			// Record to ledger
+			h.recordLedgerEntry(logEntry, tokenHash, tryModel, resolved.ProviderName,
+				inputTokens, outputTokens, resp.StatusCode, stream, retryCount,
+				extractProviderMeta(resp.Header, respBody))
+			if h.ledger != nil && !isError {
+				if userContent != "" {
+					h.ledger.RecordMemory(tokenHash, "user", tryModel, userContent)
+				}
+				if assistantContent == "" {
+					assistantContent = extractAssistantContent(respBody)
+				}
+				if assistantContent != "" {
+					h.ledger.RecordMemory(tokenHash, "assistant", tryModel, assistantContent)
 				}
 			}
 
@@ -503,12 +534,12 @@ func shouldRetry(cfg *policy.RetryConfig, statusCode int) bool {
 
 // handleStreamingResponse streams the upstream SSE response to the client,
 // counting output tokens and extracting the upstream completion ID.
-// Returns (outputTokens, assistantContent, upstreamID).
-func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string, string) {
+// Returns (outputTokens, assistantContent, upstreamID, lastChunk).
+func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string, string, map[string]interface{}) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		httpError(w, http.StatusInternalServerError, "streaming not supported")
-		return 0, "", ""
+		return 0, "", "", nil
 	}
 
 	copyHeaders(resp.Header, w.Header())
@@ -521,6 +552,7 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 	var totalOutputTokens int
 	var contentBuilder strings.Builder
 	var upstreamID string
+	var lastChunk map[string]interface{}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -540,6 +572,8 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 				continue
 			}
+
+			lastChunk = chunk
 
 			// Extract upstream ID from the first chunk
 			if upstreamID == "" {
@@ -585,7 +619,7 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 		h.sessions.AddUsage(tokenHash, int64(totalOutputTokens))
 	}
 
-	return totalOutputTokens, contentBuilder.String(), upstreamID
+	return totalOutputTokens, contentBuilder.String(), upstreamID, lastChunk
 }
 
 func (h *Handler) countResponseTokens(body []byte, tokenHash string) int {
@@ -605,6 +639,44 @@ func (h *Handler) countResponseTokens(body []byte, tokenHash string) int {
 		h.sessions.AddUsage(tokenHash, int64(completionTokens))
 	}
 	return int(completionTokens)
+}
+
+// recordLedgerEntry records a request to the session ledger if configured.
+func (h *Handler) recordLedgerEntry(logEntry *RequestLog, tokenHash, model, provider string,
+	inputTokens, outputTokens, statusCode int, stream bool, retryCount int, providerMeta *ledger.ProviderMeta) {
+	if h.ledger == nil {
+		return
+	}
+
+	entry := ledger.RequestEntry{
+		Timestamp:         time.Now().UTC(),
+		TokenHash:         tokenHash,
+		Model:             model,
+		Provider:          provider,
+		InputTokens:       inputTokens,
+		OutputTokens:      outputTokens,
+		DurationMs:        logEntry.DurationMs,
+		StatusCode:        statusCode,
+		Stream:            stream,
+		Error:             logEntry.Error,
+		UpstreamID:        logEntry.UpstreamID,
+		UpstreamRequestID: logEntry.UpstreamRequestID,
+		RetryCount:        retryCount,
+		FallbackModel:     logEntry.FallbackModel,
+		Metadata:          logEntry.Metadata,
+		ProviderMeta:      providerMeta,
+	}
+
+	// Convert rule matches
+	for _, rm := range logEntry.RuleMatches {
+		entry.RuleMatches = append(entry.RuleMatches, ledger.RuleMatchEntry{
+			Name:    rm.Name,
+			Action:  rm.Action,
+			Message: rm.Message,
+		})
+	}
+
+	h.ledger.RecordRequest(entry)
 }
 
 func extractAssistantContent(body []byte) string {
