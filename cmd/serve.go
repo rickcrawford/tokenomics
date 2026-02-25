@@ -16,6 +16,7 @@ import (
 	"github.com/rickcrawford/tokenomics/internal/config"
 	"github.com/rickcrawford/tokenomics/internal/events"
 	"github.com/rickcrawford/tokenomics/internal/proxy"
+	"github.com/rickcrawford/tokenomics/internal/remote"
 	"github.com/rickcrawford/tokenomics/internal/session"
 	"github.com/rickcrawford/tokenomics/internal/store"
 	tlsutil "github.com/rickcrawford/tokenomics/internal/tls"
@@ -57,6 +58,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer tokenStore.Close()
 	tokenStore.StartFileWatch(5 * time.Second)
 
+	// Remote sync (if configured)
+	if cfg.Remote.URL != "" {
+		rc := buildRemoteClient(cfg.Remote)
+		n, err := rc.SyncTo(tokenStore)
+		if err != nil {
+			log.Printf("Remote sync failed: %v (continuing with local tokens)", err)
+		} else {
+			log.Printf("Remote sync: %d token(s) loaded from %s", n, cfg.Remote.URL)
+		}
+		if cfg.Remote.SyncSec > 0 {
+			rc.StartPeriodicSync(tokenStore, time.Duration(cfg.Remote.SyncSec)*time.Second)
+			defer rc.Stop()
+		}
+	}
+
 	// Init session store
 	var sessStore session.Store
 	switch cfg.Session.Backend {
@@ -75,6 +91,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create proxy handler with provider configs and event emitter
 	handler := proxy.NewHandler(tokenStore, sessStore, hashKey, cfg.Server.UpstreamURL, cfg.Providers, emitter)
+	handler.SetLogging(cfg.Logging)
 
 	// Wire up Redis memory writer if Redis session backend is configured
 	if rs, ok := sessStore.(*session.RedisStore); ok {
@@ -195,6 +212,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// buildRemoteClient creates a remote sync client from config.
+func buildRemoteClient(cfg config.RemoteConfig) *remote.Client {
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	if cfg.Insecure {
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+	return remote.NewClient(cfg.URL, cfg.APIKey, httpClient)
 }
 
 // buildEmitter constructs the event emitter from config.

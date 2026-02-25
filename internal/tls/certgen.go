@@ -122,7 +122,10 @@ func EnsureCerts(certDir string) (*CertPaths, error) {
 }
 
 func newSerial() *big.Int {
-	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return big.NewInt(time.Now().UnixNano())
+	}
 	return serial
 }
 

@@ -10,6 +10,8 @@ Use this skill when the user wants to:
 - Start or configure the proxy server
 - Generate agent init commands for OpenAI/Anthropic/Azure/Gemini SDKs
 - Set up webhooks or provider configs
+- Configure logging or remote token sync
+- Start the remote config server
 
 ## Environment Check
 
@@ -49,6 +51,19 @@ Expiration formats: `24h`, `7d`, `30d`, `1y`, RFC3339, or `clear`.
 ```
 
 Default ports: 8080 (HTTP), 8443 (HTTPS with auto-generated TLS).
+
+### Remote Config Server
+
+```bash
+# Start a central config server (other proxies sync from this)
+./bin/tokenomics remote --addr :9090 --api-key my-secret
+
+# Configure a proxy to sync from it (in config.yaml)
+# remote:
+#   url: http://config-server:9090
+#   api_key: my-secret
+#   sync: 60       # re-sync every 60 seconds
+```
 
 ### Agent Init
 
@@ -157,3 +172,29 @@ Then assemble the policy JSON, show it for confirmation, and run the create comm
 16 pre-configured: OpenAI, Anthropic, Azure OpenAI, Google Gemini, Vertex AI, Mistral, Cohere, Groq, Together AI, Fireworks AI, Perplexity, DeepSeek, xAI (Grok), OpenRouter, Ollama, vLLM.
 
 Provider YAML examples in `examples/providers/`.
+
+## Logging Configuration
+
+```yaml
+logging:
+  level: info              # debug, info, warn, error
+  format: json             # json or text
+  request_body: false      # log full request bodies
+  response_body: false     # log full response bodies
+  hide_token_hash: false   # mask hashes in logs with ****
+  disable_request: false   # suppress per-request structured logs
+```
+
+## Remote Token Sync
+
+```yaml
+remote:
+  url: http://config-server:9090   # central server URL
+  api_key: my-secret               # shared API key
+  sync: 60                         # re-sync every N seconds (0 = startup only)
+  insecure: false                  # skip TLS verification
+```
+
+The remote server runs via `./bin/tokenomics remote --addr :9090 --api-key <key>`.
+It serves `GET /api/v1/tokens` and `GET /api/v1/tokens/<hash>` with Bearer auth.
+Sync is additive. Local-only tokens are preserved.

@@ -61,6 +61,8 @@ See [examples/](examples/) for provider configs, sample policies, env setup, and
 | **Encryption** | AES-256-GCM at-rest encryption for stored policies |
 | **Webhooks** | Events for token CRUD, rule violations, budget alerts, request completion |
 | **Token expiration** | Temporary access with durations (24h, 7d, 30d) or RFC3339 timestamps |
+| **Remote sync** | Load tokens from a central config server on startup or on a schedule |
+| **Logging control** | Configurable log level, format, request suppression, token hash masking |
 | **Structured logging** | JSON logs with rule matches, upstream IDs, and cost metadata |
 
 ## Documentation

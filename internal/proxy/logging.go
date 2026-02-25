@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"time"
 )
 
 // RequestLog is a structured JSON log entry for each proxied request.
@@ -83,7 +82,7 @@ func extractUpstreamID(body []byte) string {
 func logRequest(entry *RequestLog) {
 	data, err := json.Marshal(entry)
 	if err != nil {
-		log.Printf("error marshaling log entry: %v", err)
+		log.Printf("[request] marshal error: %v (method=%s path=%s status=%d)", err, entry.Method, entry.Path, entry.StatusCode)
 		return
 	}
 	log.Println(string(data))
@@ -112,9 +111,4 @@ func (lw *loggingResponseWriter) Flush() {
 	if f, ok := lw.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
-}
-
-// requestStartTime returns the current time for latency tracking.
-func requestStartTime() time.Time {
-	return time.Now()
 }

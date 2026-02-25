@@ -45,7 +45,30 @@ session:
     db: 0                  # Redis database number
 
 security:
-  hash_key_env: "TOKENOMICS_HASH_KEY"  # Env var name that holds the HMAC key
+  hash_key_env: "TOKENOMICS_HASH_KEY"          # Env var name that holds the HMAC key
+  encryption_key_env: "TOKENOMICS_ENCRYPTION_KEY"  # Env var for AES-256 at-rest encryption
+
+logging:
+  level: "info"              # "debug", "info", "warn", "error"
+  format: "json"             # "json" or "text"
+  request_body: false        # Log full request bodies
+  response_body: false       # Log full response bodies
+  hide_token_hash: false     # Mask token hashes in logs
+  disable_request: false     # Suppress per-request structured logs
+
+events:
+  webhooks:
+    - url: "http://localhost:9999/webhook"
+      secret: ""             # Shared secret (X-Webhook-Secret header)
+      signing_key: ""        # HMAC-SHA256 key (X-Webhook-Signature header)
+      events: []             # Filter by event type (empty = all). Supports trailing wildcard (token.*)
+      timeout: 10            # HTTP timeout in seconds
+
+remote:
+  url: ""                    # Central config server URL (e.g. http://config-server:9090)
+  api_key: ""                # Shared API key for authentication
+  sync: 0                    # Sync interval in seconds (0 = startup only)
+  insecure: false            # Skip TLS verification
 ```
 
 ### Field Descriptions
@@ -66,6 +89,22 @@ security:
 | `session.redis.password` | (empty) | Redis password. |
 | `session.redis.db` | `0` | Redis database number. |
 | `security.hash_key_env` | `TOKENOMICS_HASH_KEY` | Name of the environment variable that contains the HMAC secret used for token hashing. |
+| `security.encryption_key_env` | `TOKENOMICS_ENCRYPTION_KEY` | Name of the env var for AES-256-GCM at-rest encryption of policies in BoltDB. |
+| `logging.level` | `info` | Log level: `debug`, `info`, `warn`, `error`. |
+| `logging.format` | `json` | Log format: `json` (structured) or `text`. |
+| `logging.request_body` | `false` | Include full request body in logs. |
+| `logging.response_body` | `false` | Include full response body in logs. |
+| `logging.hide_token_hash` | `false` | Replace token hashes with `****` in logs. |
+| `logging.disable_request` | `false` | Suppress per-request structured log entries entirely. |
+| `events.webhooks[].url` | (required) | Webhook endpoint URL. |
+| `events.webhooks[].secret` | (empty) | Shared secret sent as `X-Webhook-Secret`. |
+| `events.webhooks[].signing_key` | (empty) | HMAC-SHA256 signing key for `X-Webhook-Signature`. |
+| `events.webhooks[].events` | `[]` (all) | Event type filter. Supports trailing wildcard (`token.*`). |
+| `events.webhooks[].timeout` | `10` | HTTP timeout in seconds for webhook delivery. |
+| `remote.url` | (empty) | URL of a remote config server to sync tokens from. |
+| `remote.api_key` | (empty) | API key for authenticating with the remote server. |
+| `remote.sync` | `0` | Sync interval in seconds. `0` means sync at startup only. |
+| `remote.insecure` | `false` | Skip TLS certificate verification for the remote server. |
 
 ## Environment Variables
 
@@ -87,6 +126,13 @@ Every config field can be overridden with a `TOKENOMICS_` prefixed environment v
 | `session.redis.password` | `TOKENOMICS_SESSION_REDIS_PASSWORD` |
 | `session.redis.db` | `TOKENOMICS_SESSION_REDIS_DB` |
 | `security.hash_key_env` | `TOKENOMICS_SECURITY_HASH_KEY_ENV` |
+| `security.encryption_key_env` | `TOKENOMICS_SECURITY_ENCRYPTION_KEY_ENV` |
+| `logging.level` | `TOKENOMICS_LOGGING_LEVEL` |
+| `logging.format` | `TOKENOMICS_LOGGING_FORMAT` |
+| `logging.disable_request` | `TOKENOMICS_LOGGING_DISABLE_REQUEST` |
+| `remote.url` | `TOKENOMICS_REMOTE_URL` |
+| `remote.api_key` | `TOKENOMICS_REMOTE_API_KEY` |
+| `remote.sync` | `TOKENOMICS_REMOTE_SYNC` |
 
 Example:
 

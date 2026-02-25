@@ -16,12 +16,13 @@ Always run `make test` after adding or modifying features. Fix failures before c
 ## Project Layout
 
 ```
-cmd/                   CLI commands (Cobra): serve, token, init
+cmd/                   CLI commands (Cobra): serve, token, init, remote
 internal/
-  config/              YAML config loading, provider definitions
+  config/              YAML config loading, provider definitions, logging config
   events/              Event emitter interface, webhook delivery
   policy/              Policy parsing, rules engine, PII detection
   proxy/               HTTP handler, rate limiting, stats, logging
+  remote/              Remote config server and client for centralized token sync
   session/             Usage tracking (memory or Redis)
   store/               BoltDB token storage, encryption
   tls/                 Certificate generation

@@ -29,6 +29,26 @@ security:
   hash_key_env: TOKENOMICS_HASH_KEY              # Env var for HMAC token hashing
   encryption_key_env: TOKENOMICS_ENCRYPTION_KEY   # Env var for AES-256-GCM at-rest encryption
 
+# ── Logging ───────────────────────────────────────────────────────────
+logging:
+  level: info                # debug, info, warn, error
+  format: json               # json or text
+  request_body: false        # Log full request bodies (careful in production)
+  response_body: false       # Log full response bodies
+  hide_token_hash: false     # Mask token hashes with **** in logs
+  disable_request: false     # Suppress per-request structured log lines
+
+# ── Remote Token Sync ─────────────────────────────────────────────────
+#
+# Load tokens from a central config server on startup (and optionally on a schedule).
+# Run the server: ./bin/tokenomics remote --addr :9090 --api-key my-remote-key
+#
+# remote:
+#   url: http://config-server:9090
+#   api_key: my-remote-key
+#   sync: 60                 # Re-sync every 60 seconds (0 = startup only)
+#   insecure: false          # Skip TLS verification
+
 # ── Webhook Events ──────────────────────────────────────────────────────
 #
 # Fire HTTP POST requests when things happen.

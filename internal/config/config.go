@@ -12,8 +12,28 @@ type Config struct {
 	Storage   StorageConfig             `mapstructure:"storage"`
 	Session   SessionConfig             `mapstructure:"session"`
 	Security  SecurityConfig            `mapstructure:"security"`
+	Logging   LoggingConfig             `mapstructure:"logging"`
 	Providers map[string]ProviderConfig `mapstructure:"providers"`
 	Events    EventsConfig              `mapstructure:"events"`
+	Remote    RemoteConfig              `mapstructure:"remote"`
+}
+
+// LoggingConfig controls request and event logging behavior.
+type LoggingConfig struct {
+	Level          string `mapstructure:"level"`           // "debug", "info" (default), "warn", "error"
+	Format         string `mapstructure:"format"`          // "json" (default), "text"
+	RequestBody    bool   `mapstructure:"request_body"`    // Log full request bodies (default false)
+	ResponseBody   bool   `mapstructure:"response_body"`   // Log full response bodies (default false)
+	HideTokenHash  bool   `mapstructure:"hide_token_hash"` // Mask token hashes in logs (default false)
+	DisableRequest bool   `mapstructure:"disable_request"` // Suppress per-request structured logs (default false)
+}
+
+// RemoteConfig configures loading tokens and config from a central server.
+type RemoteConfig struct {
+	URL      string `mapstructure:"url"`       // Central server URL (e.g. http://config-server:9090)
+	APIKey   string `mapstructure:"api_key"`   // Shared API key for authentication
+	SyncSec  int    `mapstructure:"sync"`      // Sync interval in seconds (0 = startup only)
+	Insecure bool   `mapstructure:"insecure"`  // Skip TLS verification
 }
 
 // EventsConfig holds webhook and future event emitter configuration.
@@ -100,6 +120,8 @@ func Load(cfgFile string) (*Config, error) {
 	viper.SetDefault("session.redis.db", 0)
 	viper.SetDefault("security.hash_key_env", "TOKENOMICS_HASH_KEY")
 	viper.SetDefault("security.encryption_key_env", "TOKENOMICS_ENCRYPTION_KEY")
+	viper.SetDefault("logging.level", "info")
+	viper.SetDefault("logging.format", "json")
 
 	viper.SetEnvPrefix("TOKENOMICS")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

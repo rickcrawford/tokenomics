@@ -145,3 +145,161 @@ func TestGetProvider_NilProviders(t *testing.T) {
 		t.Fatal("expected provider not found on nil map")
 	}
 }
+
+func TestLoadConfig_Defaults(t *testing.T) {
+	dir := t.TempDir()
+	configYAML := `
+server:
+  upstream_url: https://api.openai.com
+`
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	// Check defaults
+	if cfg.Server.HTTPPort != 8080 {
+		t.Errorf("HTTPPort = %d, want 8080", cfg.Server.HTTPPort)
+	}
+	if cfg.Server.HTTPSPort != 8443 {
+		t.Errorf("HTTPSPort = %d, want 8443", cfg.Server.HTTPSPort)
+	}
+	if cfg.Storage.DBPath != "./tokenomics.db" {
+		t.Errorf("DBPath = %q, want ./tokenomics.db", cfg.Storage.DBPath)
+	}
+	if cfg.Session.Backend != "memory" {
+		t.Errorf("Session.Backend = %q, want memory", cfg.Session.Backend)
+	}
+	if cfg.Logging.Level != "info" {
+		t.Errorf("Logging.Level = %q, want info", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != "json" {
+		t.Errorf("Logging.Format = %q, want json", cfg.Logging.Format)
+	}
+}
+
+func TestLoadConfig_LoggingOverrides(t *testing.T) {
+	dir := t.TempDir()
+	configYAML := `
+server:
+  upstream_url: https://api.openai.com
+logging:
+  level: debug
+  format: text
+  request_body: true
+  hide_token_hash: true
+  disable_request: true
+`
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	if cfg.Logging.Level != "debug" {
+		t.Errorf("Logging.Level = %q, want debug", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != "text" {
+		t.Errorf("Logging.Format = %q, want text", cfg.Logging.Format)
+	}
+	if !cfg.Logging.RequestBody {
+		t.Error("Logging.RequestBody should be true")
+	}
+	if !cfg.Logging.HideTokenHash {
+		t.Error("Logging.HideTokenHash should be true")
+	}
+	if !cfg.Logging.DisableRequest {
+		t.Error("Logging.DisableRequest should be true")
+	}
+}
+
+func TestLoadConfig_RemoteConfig(t *testing.T) {
+	dir := t.TempDir()
+	configYAML := `
+server:
+  upstream_url: https://api.openai.com
+remote:
+  url: http://config-server:9090
+  api_key: secret123
+  sync: 60
+  insecure: true
+`
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	if cfg.Remote.URL != "http://config-server:9090" {
+		t.Errorf("Remote.URL = %q", cfg.Remote.URL)
+	}
+	if cfg.Remote.APIKey != "secret123" {
+		t.Errorf("Remote.APIKey = %q", cfg.Remote.APIKey)
+	}
+	if cfg.Remote.SyncSec != 60 {
+		t.Errorf("Remote.SyncSec = %d, want 60", cfg.Remote.SyncSec)
+	}
+	if !cfg.Remote.Insecure {
+		t.Error("Remote.Insecure should be true")
+	}
+}
+
+func TestLoadConfig_EventsWebhook(t *testing.T) {
+	dir := t.TempDir()
+	configYAML := `
+server:
+  upstream_url: https://api.openai.com
+events:
+  webhooks:
+    - url: http://localhost:9999/webhook
+      secret: my-secret
+      signing_key: my-key
+      events:
+        - token.*
+        - request.completed
+      timeout: 5
+`
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	if len(cfg.Events.Webhooks) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(cfg.Events.Webhooks))
+	}
+
+	wh := cfg.Events.Webhooks[0]
+	if wh.URL != "http://localhost:9999/webhook" {
+		t.Errorf("Webhook.URL = %q", wh.URL)
+	}
+	if wh.Secret != "my-secret" {
+		t.Errorf("Webhook.Secret = %q", wh.Secret)
+	}
+	if wh.SigningKey != "my-key" {
+		t.Errorf("Webhook.SigningKey = %q", wh.SigningKey)
+	}
+	if len(wh.Events) != 2 {
+		t.Errorf("Webhook.Events = %v", wh.Events)
+	}
+	if wh.TimeoutSec != 5 {
+		t.Errorf("Webhook.TimeoutSec = %d, want 5", wh.TimeoutSec)
+	}
+}
