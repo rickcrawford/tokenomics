@@ -1,27 +1,26 @@
-# Ledger: Per-Session Cost Tracking in Git
+# Ledger: Per-Session Token Tracking in Git
 
-Record memory, logs, and token counts for every proxy session into a `.tokenomics/` folder in the project root. Data is committed alongside code changes, enabling cost-per-feature and cost-per-branch analysis over time.
+Record memory, logs, and token counts for every proxy session into a `.tokenomics/` folder in the project root. Data is committed alongside code changes, enabling token-per-feature and token-per-branch analysis over time. Cost estimation is intentionally excluded. Pricing is volatile and belongs at query time in whatever analytics layer consumes this data.
 
 ## Problem
 
-Today, token usage lives only in-memory (`/stats` endpoint) or in stdout JSON logs. Both are ephemeral. There is no persistent, git-native record of what a coding session cost. Teams cannot answer: "How many tokens did feature X consume across all sessions?"
+Today, token usage lives only in-memory (`/stats` endpoint) or in stdout JSON logs. Both are ephemeral. There is no persistent, git-native record of what a coding session consumed. Teams cannot answer: "How many tokens did feature X use across all sessions?"
 
 ## Goals
 
 | Goal | How |
 |------|-----|
-| Track token spend per session | Write a session summary JSON after each proxy run |
-| Track token spend per feature | Tag every record with `git_branch` and `git_commit` |
+| Track token usage per session | Write a session summary JSON after each proxy run |
+| Track token usage per feature | Tag every record with `git_branch` and `git_commit` |
 | Record conversation memory | Capture user/assistant messages alongside token counts |
-| Enable cost estimation | Ship a model pricing table, compute estimated USD |
 | Aggregate across sessions | CLI command reads `.tokenomics/` and rolls up by branch, model, date |
 | Commit-friendly | Small, append-friendly files. No binary data |
+| Raw facts only | No pricing or cost estimates. Store tokens, models, timing. Cost is a downstream concern |
 
 ## Folder Structure
 
 ```
 .tokenomics/
-  pricing.json                          # model pricing ($/1M tokens), ships with defaults
   sessions/
     2026-02-25_a1b2c3d4.json            # one file per proxy session
   memory/
@@ -53,23 +52,20 @@ Today, token usage lives only in-memory (`/stats` endpoint) or in stdout JSON lo
     "input_tokens": 125000,
     "output_tokens": 89000,
     "total_tokens": 214000,
-    "error_count": 2,
-    "estimated_cost_usd": 1.23
+    "error_count": 2
   },
   "by_model": {
     "claude-sonnet-4-20250514": {
       "request_count": 30,
       "input_tokens": 80000,
       "output_tokens": 60000,
-      "total_tokens": 140000,
-      "estimated_cost_usd": 0.78
+      "total_tokens": 140000
     },
     "gpt-4o": {
       "request_count": 15,
       "input_tokens": 45000,
       "output_tokens": 29000,
-      "total_tokens": 74000,
-      "estimated_cost_usd": 0.45
+      "total_tokens": 74000
     }
   },
   "requests": [
@@ -95,9 +91,9 @@ Today, token usage lives only in-memory (`/stats` endpoint) or in stdout JSON lo
 
 - `requests` array captures every proxied call with enough detail for debugging without storing full bodies.
 - `git.commit_start` is HEAD when the proxy starts. `git.commit_end` is HEAD when it stops. This brackets what code was being worked on.
-- `by_model` rollup enables quick per-model cost breakdowns.
+- `by_model` rollup enables quick per-model token breakdowns.
 - `metadata` is carried from the token's policy, enabling team/project tagging.
-- `estimated_cost_usd` is computed using `pricing.json` at write time.
+- No pricing or cost fields. Downstream analytics can join model + token counts with current pricing at query time.
 
 ### Session Memory (`memory/<date>_<id>.md`)
 
@@ -117,41 +113,6 @@ Here's a function that validates email addresses...
 
 Same markdown format already used by `DirMemoryWriter`. The ledger reuses the existing memory writer infrastructure but targets the `.tokenomics/memory/` directory.
 
-### Pricing Table (`pricing.json`)
-
-```json
-{
-  "version": 1,
-  "updated_at": "2026-02-01",
-  "models": {
-    "gpt-4o": { "input_per_1m": 2.50, "output_per_1m": 10.00 },
-    "gpt-4o-mini": { "input_per_1m": 0.15, "output_per_1m": 0.60 },
-    "gpt-4.1": { "input_per_1m": 2.00, "output_per_1m": 8.00 },
-    "gpt-4.1-mini": { "input_per_1m": 0.40, "output_per_1m": 1.60 },
-    "gpt-4.1-nano": { "input_per_1m": 0.10, "output_per_1m": 0.40 },
-    "o3": { "input_per_1m": 2.00, "output_per_1m": 8.00 },
-    "o3-mini": { "input_per_1m": 1.10, "output_per_1m": 4.40 },
-    "o4-mini": { "input_per_1m": 1.10, "output_per_1m": 4.40 },
-    "claude-opus-4-20250514": { "input_per_1m": 15.00, "output_per_1m": 75.00 },
-    "claude-sonnet-4-20250514": { "input_per_1m": 3.00, "output_per_1m": 15.00 },
-    "claude-haiku-4-20250514": { "input_per_1m": 0.80, "output_per_1m": 4.00 },
-    "claude-3-5-sonnet-20241022": { "input_per_1m": 3.00, "output_per_1m": 15.00 },
-    "gemini-2.5-pro": { "input_per_1m": 1.25, "output_per_1m": 10.00 },
-    "gemini-2.5-flash": { "input_per_1m": 0.15, "output_per_1m": 0.60 },
-    "deepseek-chat": { "input_per_1m": 0.27, "output_per_1m": 1.10 },
-    "deepseek-reasoner": { "input_per_1m": 0.55, "output_per_1m": 2.19 }
-  },
-  "fallback": {
-    "input_per_1m": 3.00,
-    "output_per_1m": 15.00
-  }
-}
-```
-
-- Users can edit this file to add models or update prices.
-- `fallback` pricing applies to any model not in the table.
-- `tokenomics ledger update-pricing` could fetch latest prices (future enhancement).
-
 ## Implementation Plan
 
 ### Phase 1: Core Ledger Package
@@ -163,7 +124,6 @@ Same markdown format already used by `DirMemoryWriter`. The ledger reuses the ex
 | `ledger.go` | `Ledger` struct, `Open()`, `Close()`, `RecordRequest()`, `WriteSession()` |
 | `session.go` | `Session` struct, accumulates requests, computes rollups |
 | `git.go` | `GitContext()`: detect branch, commit, repo root via `git` commands |
-| `pricing.go` | Load `pricing.json`, compute cost from token counts |
 | `ledger_test.go` | Unit tests |
 
 **Ledger struct:**
@@ -173,12 +133,11 @@ type Ledger struct {
     dir        string       // .tokenomics/ path
     sessionID  string       // 8-char hex, generated at Open()
     session    *Session     // accumulates requests
-    pricing    *PricingTable
     memWriter  session.MemoryWriter  // reuse existing DirMemoryWriter
     mu         sync.Mutex
 }
 
-func Open(dir string) (*Ledger, error)           // create dirs, load pricing, snapshot git
+func Open(dir string) (*Ledger, error)           // create dirs, snapshot git
 func (l *Ledger) RecordRequest(entry RequestEntry) // append to session
 func (l *Ledger) RecordMemory(tokenHash, role, model, content string) error
 func (l *Ledger) Close() error                    // snapshot git end, compute costs, write JSON
@@ -188,7 +147,7 @@ func (l *Ledger) Close() error                    // snapshot git end, compute c
 
 - `Open()` creates `.tokenomics/sessions/` and `.tokenomics/memory/` directories if missing. Captures `git.commit_start` and `git.branch`.
 - `RecordRequest()` is called from the proxy after each completed request. Thread-safe. Appends to an in-memory list.
-- `Close()` captures `git.commit_end`, computes `by_model` rollups and cost estimates, writes the session JSON file, and closes the memory writer.
+- `Close()` captures `git.commit_end`, computes `by_model` rollups, writes the session JSON file, and closes the memory writer.
 - If the `.tokenomics/` directory does not exist and ledger is enabled, it gets created with a brief `README` explaining the folder.
 
 ### Phase 2: Config Integration
@@ -287,28 +246,28 @@ if h.ledger != nil {
 | `tokenomics ledger summary --since 2026-02-01` | Filter by date range |
 | `tokenomics ledger sessions` | List all recorded sessions |
 | `tokenomics ledger show <session-id>` | Print details for one session |
-| `tokenomics ledger init` | Create `.tokenomics/` with default `pricing.json` |
+| `tokenomics ledger init` | Create `.tokenomics/` directory structure |
 
 **Example output for `tokenomics ledger summary --by-branch`:**
 
 ```
-Branch                    Sessions  Requests  Input Tokens  Output Tokens  Total Tokens  Est. Cost
-feature/add-auth               5       120       450,000        280,000       730,000      $4.52
-feature/refactor-db            3        67       210,000        140,000       350,000      $2.18
-bugfix/login-redirect          1        12        35,000         18,000        53,000      $0.33
+Branch                    Sessions  Requests  Input Tokens  Output Tokens  Total Tokens
+feature/add-auth               5       120       450,000        280,000       730,000
+feature/refactor-db            3        67       210,000        140,000       350,000
+bugfix/login-redirect          1        12        35,000         18,000        53,000
 
-TOTAL                          9       199       695,000        438,000     1,133,000      $7.03
+TOTAL                          9       199       695,000        438,000     1,133,000
 ```
 
 **Example output for `tokenomics ledger summary --by-model`:**
 
 ```
-Model                        Requests  Input Tokens  Output Tokens  Total Tokens  Est. Cost
-claude-sonnet-4-20250514          120       400,000        250,000       650,000      $4.95
-gpt-4o                            55       220,000        150,000       370,000      $1.73
-gpt-4o-mini                       24        75,000         38,000       113,000      $0.03
+Model                        Requests  Input Tokens  Output Tokens  Total Tokens
+claude-sonnet-4-20250514          120       400,000        250,000       650,000
+gpt-4o                            55       220,000        150,000       370,000
+gpt-4o-mini                       24        75,000         38,000       113,000
 
-TOTAL                            199       695,000        438,000     1,133,000      $7.03
+TOTAL                            199       695,000        438,000     1,133,000
 ```
 
 ### Phase 5: Documentation
@@ -341,20 +300,19 @@ TOTAL                            199       695,000        438,000     1,133,000 
     | sessions/*.json |          | memory/*.md    |
     +-----------------+          +----------------+
             |
-      Close() -> write summary
-            |
-    +-------v--------+
-    | pricing.json   | -> estimated_cost_usd
-    +----------------+
+      Close() -> write summary with by_model rollups
 
 
     CLI reads .tokenomics/ directly:
 
     +------------------+
-    | ledger summary   |----> reads sessions/*.json
+    | ledger summary   |----> reads sessions/*.json, aggregates tokens
     | ledger sessions  |----> lists sessions/*.json
     | ledger show <id> |----> reads one session file
     +------------------+
+
+    Downstream analytics (database, dashboard, etc.)
+    joins session data with current model pricing at query time.
 ```
 
 ## Files Changed
@@ -364,7 +322,6 @@ TOTAL                            199       695,000        438,000     1,133,000 
 | `internal/ledger/ledger.go` | New | Core ledger: Open, RecordRequest, Close |
 | `internal/ledger/session.go` | New | Session accumulator, rollup computation |
 | `internal/ledger/git.go` | New | Git branch/commit detection |
-| `internal/ledger/pricing.go` | New | Pricing table load, cost computation |
 | `internal/ledger/ledger_test.go` | New | Unit tests for ledger package |
 | `internal/config/config.go` | Modify | Add `LedgerConfig` struct and field |
 | `internal/proxy/handler.go` | Modify | Add `ledger` field, `SetLedger()` method |
@@ -394,7 +351,6 @@ TOTAL                            199       695,000        438,000     1,133,000 
 | Not a git repo | `git` fields are empty strings, session still recorded |
 | Proxy crashes (no graceful shutdown) | Session data lost for that run. Future: periodic flush |
 | `.tokenomics/` dir is read-only | Log warning, continue without ledger |
-| No `pricing.json` found | Create default one on first `Open()`, or use fallback pricing |
 | Concurrent proxy instances | Each gets unique session ID. No file conflicts |
 | Very long session (1000+ requests) | `requests` array grows. Consider truncation flag in future |
 
@@ -402,7 +358,7 @@ TOTAL                            199       695,000        438,000     1,133,000 
 
 - **Periodic flush**: Write partial session data every N minutes to survive crashes.
 - **JSONL mode**: For very long sessions, use append-only `requests.jsonl` instead of a single JSON array.
-- **GitHub Actions integration**: `tokenomics ledger summary` as a PR comment showing feature cost.
-- **Cost alerts**: Warn when session cost exceeds a threshold.
-- **Pricing updates**: `tokenomics ledger update-pricing` fetches latest model pricing.
+- **GitHub Actions integration**: `tokenomics ledger summary` as a PR comment showing feature token usage.
+- **Token budget alerts**: Warn when session token count exceeds a threshold.
+- **Export**: JSON or CSV export for loading into databases, spreadsheets, or BI tools.
 - **Dashboard**: HTML report generation from ledger data.
