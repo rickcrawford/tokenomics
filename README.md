@@ -163,6 +163,7 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 
 | Topic | Description |
 |-------|-------------|
+| [Features](docs/FEATURES.md) | Complete feature reference organized by category |
 | [Examples](examples/) | Provider configs, sample policies, webhook collector, env template |
 | [Configuration](docs/CONFIGURATION.md) | config.yaml fields, environment variables, CLI flags |
 | [Policies](docs/POLICIES.md) | Policy JSON schema, model filtering, rules, prompts, memory |
