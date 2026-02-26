@@ -4,3 +4,4 @@ certs/
 .env
 tokenomics.db
 webhook-collector
+.tokenomics/
