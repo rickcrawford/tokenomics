@@ -55,9 +55,10 @@ providers:
 }
 
 func TestDetectProviderFromCLI_NoConfig(t *testing.T) {
+	// Even with missing config, hard-coded defaults should work
 	result := detectProviderFromCLI("claude", "/nonexistent/config.yaml")
-	if result != "" {
-		t.Errorf("expected empty string for missing config, got %q", result)
+	if result != "anthropic" {
+		t.Errorf("expected 'anthropic' from hard-coded defaults, got %q", result)
 	}
 }
 

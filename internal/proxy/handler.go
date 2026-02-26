@@ -42,16 +42,17 @@ func safePrefix(s string, n int) string {
 }
 
 type Handler struct {
-	store       store.TokenStore
-	sessions    session.Store
-	stats       *UsageStats
-	rateLimiter *RateLimiter
-	emitter     events.Emitter
-	hashKey     []byte
-	upstreamURL string
-	providers   map[string]config.ProviderConfig
-	logging     config.LoggingConfig
-	ledger      *ledger.Ledger
+	store           store.TokenStore
+	sessions        session.Store
+	stats           *UsageStats
+	rateLimiter     *RateLimiter
+	emitter         events.Emitter
+	hashKey         []byte
+	upstreamURL     string
+	providers       map[string]config.ProviderConfig
+	defaultProvider string // Default provider when policy doesn't specify one
+	logging         config.LoggingConfig
+	ledger          *ledger.Ledger
 
 	memWriterMu    sync.Mutex
 	memWriters     map[string]session.MemoryWriter
@@ -81,6 +82,11 @@ func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstream
 // SetLogging configures logging behavior from the config.
 func (h *Handler) SetLogging(cfg config.LoggingConfig) {
 	h.logging = cfg
+}
+
+// SetDefaultProvider sets the default provider to use when policies don't specify one.
+func (h *Handler) SetDefaultProvider(provider string) {
+	h.defaultProvider = provider
 }
 
 // SetLedger configures the session ledger for token usage tracking.
@@ -191,6 +197,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Hash token
 	tokenHash := h.hashToken(rawToken)
+
+	// Log token extraction (to file)
+	debugLog("Token extracted from header")
+	debugLog("Token hash: %s", safePrefix(tokenHash, 16))
 
 	// Lookup policy
 	pol, err := h.store.Lookup(tokenHash)

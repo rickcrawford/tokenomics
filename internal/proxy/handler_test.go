@@ -441,6 +441,82 @@ func TestHandler_Passthrough(t *testing.T) {
 	}
 }
 
+func TestHandler_PassthroughXApiKeyHeaderCleaned(t *testing.T) {
+	t.Setenv("PT_XAPI_KEY", "sk-pt-real-key")
+
+	var upstreamHeaders http.Header
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		upstreamHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[]}`))
+	})
+	defer upstream.Close()
+
+	pol := &policy.Policy{BaseKeyEnv: "PT_XAPI_KEY"}
+	pol.Validate()
+	ts.Save(hashForTest(handler, "tkn_pt_xapi"), pol)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	// Send wrapped token via x-api-key header
+	req.Header.Set("x-api-key", "tkn_pt_xapi")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify wrapped token was NOT sent to upstream
+	if upstreamHeaders.Get("x-api-key") == "tkn_pt_xapi" {
+		t.Error("wrapped token (tkn_pt_xapi) was sent to upstream via x-api-key - should have been cleaned")
+	}
+
+	// Verify real key was sent via Authorization header
+	authHeader := upstreamHeaders.Get("Authorization")
+	if !strings.Contains(authHeader, "sk-pt-real-key") {
+		t.Errorf("expected real API key in Authorization header, got %q", authHeader)
+	}
+}
+
+func TestHandler_PassthroughAuthHeaderCleaned(t *testing.T) {
+	t.Setenv("PT_AUTH_KEY", "sk-pt-auth-real")
+
+	var upstreamHeaders http.Header
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		upstreamHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"data":[]}`))
+	})
+	defer upstream.Close()
+
+	pol := &policy.Policy{BaseKeyEnv: "PT_AUTH_KEY"}
+	pol.Validate()
+	ts.Save(hashForTest(handler, "tkn_pt_auth"), pol)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	// Send wrapped token via Authorization header
+	req.Header.Set("Authorization", "Bearer tkn_pt_auth")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify wrapped token was NOT sent to upstream
+	authHeader := upstreamHeaders.Get("Authorization")
+	if strings.Contains(authHeader, "tkn_pt_auth") {
+		t.Errorf("wrapped token (tkn_pt_auth) was sent to upstream in Authorization header: %q", authHeader)
+	}
+
+	// Verify real key was sent
+	if !strings.Contains(authHeader, "sk-pt-auth-real") {
+		t.Errorf("expected real API key in Authorization header, got %q", authHeader)
+	}
+}
+
 func hashForTest(h *Handler, token string) string {
 	return h.hashToken(token)
 }

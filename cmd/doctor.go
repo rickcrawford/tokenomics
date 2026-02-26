@@ -94,8 +94,11 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 }
 
 func checkConfigFile() checkResult {
-	// Check standard locations
-	paths := []string{"config.yaml"}
+	// Check standard locations in order of precedence
+	paths := []string{
+		filepath.Join(".tokenomics", "config.yaml"),
+		"config.yaml",
+	}
 	if home, err := os.UserHomeDir(); err == nil {
 		paths = append(paths, filepath.Join(home, ".tokenomics", "config.yaml"))
 	}

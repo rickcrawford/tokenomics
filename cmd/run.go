@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
@@ -62,14 +64,48 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 }
 
-// detectProviderFromCLI looks up the provider name for a given CLI from config
+// defaultCLIMaps defines hard-coded mappings for common CLIs
+var defaultCLIMaps = map[string]string{
+	"claude":     "anthropic",
+	"anthropic":  "anthropic",
+	"python":     "generic",
+	"node":       "generic",
+	"curl":       "generic",
+	"openai":     "generic",
+	"openai-cli": "generic",
+	"azure":      "azure",
+	"gemini":     "gemini",
+	"gcloud":     "gemini",
+}
+
+// detectProviderFromCLI looks up the provider name for a given CLI from
+// hard-coded defaults first, then config file overrides if present
 func detectProviderFromCLI(cliName, cfgFile string) string {
+	// Check hard-coded defaults first
+	if provider, exists := defaultCLIMaps[cliName]; exists {
+		return provider
+	}
+
+	// If no config file specified, try to find it in standard locations
+	if cfgFile == "" {
+		// Try .tokenomics/config.yaml first
+		if _, err := os.Stat(filepath.Join(".tokenomics", "config.yaml")); err == nil {
+			cfgFile = filepath.Join(".tokenomics", "config.yaml")
+		} else if _, err := os.Stat("config.yaml"); err == nil {
+			cfgFile = "config.yaml"
+		} else if _, err := os.Stat("config.yml"); err == nil {
+			cfgFile = "config.yml"
+		}
+		// config.Load will handle home directory defaults if cfgFile is still empty
+	}
+
+	// Check config file for overrides
 	cfg, err := config.Load(cfgFile)
 	if err != nil || cfg == nil {
 		return ""
 	}
 
-	// Check if there's a mapping for this CLI name
+	// Check if there's a mapping override for this CLI name
 	if provider, exists := cfg.CLIMaps[cliName]; exists {
 		return provider
 	}
@@ -107,14 +143,19 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Determine scheme and base URL
 	scheme := "http"
+	proxyPort := runPort
 	if runTLS {
 		scheme = "https"
+		// Use port 8443 for HTTPS if default port 8080 is used
+		if proxyPort == 8080 {
+			proxyPort = 8443
+		}
 	}
 
 	// If proxy URL is provided, use remote proxy; otherwise start local proxy
 	baseURL := runProxyURL
 	if baseURL == "" {
-		baseURL = fmt.Sprintf("%s://%s:%d", scheme, runHost, runPort)
+		baseURL = fmt.Sprintf("%s://%s:%d", scheme, runHost, proxyPort)
 
 		// Build serve args. Override the port via environment so we control
 		// exactly which port the ephemeral proxy binds to.
@@ -123,13 +164,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 		serveCmd.Stdout = os.Stderr
 		serveCmd.Stderr = os.Stderr
 		// Tell serve which port to bind, overriding config defaults.
-		serveCmd.Env = append(os.Environ(),
-			fmt.Sprintf("TOKENOMICS_SERVER_HTTP_PORT=%d", runPort),
+		// Always enable both HTTP and HTTPS for ephemeral proxy
+		// Preserve all parent environment variables to ensure API key env vars are available
+		serveEnv := append(os.Environ(),
+			fmt.Sprintf("TOKENOMICS_SERVER_HTTP_PORT=%d", 8080),
+			fmt.Sprintf("TOKENOMICS_DEFAULT_PROVIDER=%s", runProvider),
 		)
-		if !runTLS {
-			// Disable TLS for local-only traffic.
-			serveCmd.Env = append(serveCmd.Env, "TOKENOMICS_SERVER_TLS_ENABLED=false")
+		// Enable debug output if requested
+		if os.Getenv("TOKENOMICS_DEBUG_ENV") == "1" {
+			serveEnv = append(serveEnv, "TOKENOMICS_DEBUG_ENV=1")
 		}
+		serveCmd.Env = serveEnv
 
 		if err := serveCmd.Start(); err != nil {
 			return fmt.Errorf("start proxy: %w", err)
@@ -182,8 +227,25 @@ func runRun(cmd *cobra.Command, args []string) error {
 		pairs = append(pairs, EnvPair{"NODE_TLS_REJECT_UNAUTHORIZED", "0"})
 	}
 
-	// Prepare environment: inherit current env and add proxy config
-	env := os.Environ()
+
+	// Prepare environment: inherit current env but remove any vars we're about to override
+	keysToSet := make(map[string]bool)
+	for _, p := range pairs {
+		keysToSet[p.Key] = true
+	}
+
+	env := []string{}
+	for _, e := range os.Environ() {
+		// Parse "KEY=VALUE" format
+		if idx := strings.Index(e, "="); idx > 0 {
+			key := e[:idx]
+			if !keysToSet[key] {
+				env = append(env, e)
+			}
+		}
+	}
+
+	// Add proxy config (overriding any inherited values)
 	for _, p := range pairs {
 		env = append(env, fmt.Sprintf("%s=%s", p.Key, p.Value))
 	}

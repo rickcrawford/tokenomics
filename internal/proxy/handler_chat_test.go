@@ -529,3 +529,93 @@ func TestHandler_PolicyWithMetadata(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestHandler_XApiKeyHeaderCleaned(t *testing.T) {
+	t.Setenv("XAPI_CLEAN_KEY", "sk-real-api-key")
+
+	var upstreamHeaders http.Header
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		upstreamHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":      "chatcmpl-clean",
+			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
+			"usage":   map[string]interface{}{"completion_tokens": 1},
+		})
+	})
+	defer upstream.Close()
+
+	pol := &policy.Policy{BaseKeyEnv: "XAPI_CLEAN_KEY"}
+	pol.Validate()
+	ts.Save(hashForTest(handler, "tkn_clean"), pol)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
+		`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`,
+	))
+	// Send wrapped token via x-api-key header
+	req.Header.Set("x-api-key", "tkn_clean")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify wrapped token was NOT sent to upstream
+	if upstreamHeaders.Get("x-api-key") == "tkn_clean" {
+		t.Error("wrapped token (tkn_clean) was sent to upstream - should have been cleaned")
+	}
+
+	// Verify real key was sent (via Authorization header for bearer auth)
+	authHeader := upstreamHeaders.Get("Authorization")
+	if !strings.Contains(authHeader, "sk-real-api-key") {
+		t.Errorf("expected real API key in Authorization header, got %q", authHeader)
+	}
+}
+
+func TestHandler_AuthorizationHeaderCleaned(t *testing.T) {
+	t.Setenv("AUTH_CLEAN_KEY", "sk-auth-real-key")
+
+	var upstreamHeaders http.Header
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		upstreamHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":      "chatcmpl-authclean",
+			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
+			"usage":   map[string]interface{}{"completion_tokens": 1},
+		})
+	})
+	defer upstream.Close()
+
+	pol := &policy.Policy{BaseKeyEnv: "AUTH_CLEAN_KEY"}
+	pol.Validate()
+	ts.Save(hashForTest(handler, "tkn_authclean"), pol)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
+		`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`,
+	))
+	// Send wrapped token via Authorization header
+	req.Header.Set("Authorization", "Bearer tkn_authclean")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify wrapped token was NOT sent to upstream
+	authHeader := upstreamHeaders.Get("Authorization")
+	if strings.Contains(authHeader, "tkn_authclean") {
+		t.Errorf("wrapped token (tkn_authclean) was sent to upstream in Authorization header: %q", authHeader)
+	}
+
+	// Verify real key was sent
+	if !strings.Contains(authHeader, "sk-auth-real-key") {
+		t.Errorf("expected real API key in Authorization header, got %q", authHeader)
+	}
+}

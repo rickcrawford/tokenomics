@@ -13,12 +13,27 @@ import (
 )
 
 func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time) {
+	// Log policy lookup for passthrough
+	debugLog("Passthrough - Policy loaded for token %s", safePrefix(tokenHash, 16))
+	debugLog("Passthrough - BaseKeyEnv: %s", pol.BaseKeyEnv)
+
 	resolved := pol.ResolveProvider("")
 
 	// Look up provider config
 	var providerCfg *config.ProviderConfig
-	if resolved.ProviderName != "" {
-		if pc, ok := h.providers[resolved.ProviderName]; ok {
+	providerName := resolved.ProviderName
+
+	// If no provider name set, try to use the policy's default provider
+	if providerName == "" && pol.DefaultProvider != "" {
+		providerName = pol.DefaultProvider
+	}
+	// If still no provider name, try handler's default provider
+	if providerName == "" && h.defaultProvider != "" {
+		providerName = h.defaultProvider
+	}
+
+	if providerName != "" {
+		if pc, ok := h.providers[providerName]; ok {
 			providerCfg = &pc
 		}
 	}
@@ -52,8 +67,10 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 		}
 	}()
 
+	debugLog("Passthrough - Loading env var: %s", resolved.BaseKeyEnv)
 	realKey := os.Getenv(resolved.BaseKeyEnv)
 	if realKey == "" {
+		debugLog("Passthrough - ERROR: Env var %s not set", resolved.BaseKeyEnv)
 		logEntry.StatusCode = http.StatusInternalServerError
 		logEntry.Error = fmt.Sprintf("base key env %q is not set", resolved.BaseKeyEnv)
 		httpError(w, http.StatusInternalServerError, logEntry.Error)
@@ -76,8 +93,9 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 			req.URL.Host = upstreamURL.Host
 			req.Host = upstreamURL.Host
 
-			// Remove Authorization header before setting provider-specific auth
+			// Remove client's auth headers before setting provider-specific auth
 			req.Header.Del("Authorization")
+			req.Header.Del("x-api-key")
 
 			// Apply auth based on provider scheme
 			authScheme := "bearer"

@@ -250,6 +250,11 @@ type Policy struct {
 	// Example: {"openai": [{model:"gpt-4o",...}, {model_regex:"^gpt-3.*",...}]}
 	Providers map[string][]*ProviderPolicy `json:"providers,omitempty"`
 
+	// DefaultProvider specifies which provider to use when ResolveForModel
+	// returns a policy with no explicit ProviderName (i.e., when using global settings).
+	// Used to route requests to the correct provider's upstream URL and auth scheme.
+	DefaultProvider string `json:"default_provider,omitempty"`
+
 	// Session memory configuration
 	Memory MemoryConfig `json:"memory,omitempty"`
 

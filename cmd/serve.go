@@ -38,12 +38,23 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 }
 
-// setupLogFile configures logging to write to a file if TOKENOMICS_LOG_FILE is set
+// setupLogFile configures logging to write to a file (default: ~/.tokenomics/tokenomics.log)
+// Can be overridden with TOKENOMICS_LOG_FILE env var or disabled with TOKENOMICS_LOG_STDOUT=1
 func setupLogFile() error {
+	// Check if user wants to disable file logging and use stdout instead
+	if os.Getenv("TOKENOMICS_LOG_STDOUT") == "1" {
+		// Use default stdout
+		return nil
+	}
+
 	logFile := os.Getenv("TOKENOMICS_LOG_FILE")
 	if logFile == "" {
-		// No explicit log file configured, use stdout
-		return nil
+		// Default to ~/.tokenomics/tokenomics.log
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("get home directory: %w", err)
+		}
+		logFile = filepath.Join(homeDir, ".tokenomics", "tokenomics.log")
 	}
 
 	// Create parent directory if needed
@@ -70,6 +81,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not set up log file: %v\n", err)
 		// Continue anyway, logs will go to stdout
 	}
+
+
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -146,6 +159,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create proxy handler with provider configs and event emitter
 	handler := proxy.NewHandler(tokenStore, sessStore, hashKey, cfg.Server.UpstreamURL, cfg.Providers, emitter)
 	handler.SetLogging(cfg.Logging)
+	if cfg.DefaultProvider != "" {
+		handler.SetDefaultProvider(cfg.DefaultProvider)
+	}
 	if sessionLedger != nil {
 		handler.SetLedger(sessionLedger)
 	}

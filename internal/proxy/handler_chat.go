@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +21,29 @@ import (
 	"github.com/rickcrawford/tokenomics/internal/policy"
 	"github.com/rickcrawford/tokenomics/internal/tokencount"
 )
+
+// debugLog writes debug information to ~/.tokenomics/proxy-debug.log (or /tmp/tokenomics-debug.log as fallback)
+func debugLog(format string, args ...interface{}) {
+	var logFile string
+
+	// Try home directory first
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		logDir := filepath.Join(homeDir, ".tokenomics")
+		os.MkdirAll(logDir, 0o700)
+		logFile = filepath.Join(logDir, "proxy-debug.log")
+	} else {
+		// Fallback to /tmp
+		logFile = "/tmp/tokenomics-debug.log"
+	}
+
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	msg := fmt.Sprintf("[%s] %s\n", time.Now().Format("15:04:05.000"), fmt.Sprintf(format, args...))
+	f.WriteString(msg)
+}
 
 func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time) {
 	logEntry := &RequestLog{
@@ -36,6 +60,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			logRequest(logEntry)
 		}
 	}()
+
+	// DEBUG: Log incoming request
+	debugLog("=== Chat Completions Request ===")
+	debugLog("Token Hash: %s, Upstream: %s, Path: %s", safePrefix(tokenHash, 16), upstream, r.URL.Path)
 
 	// Read body (with size limit to prevent abuse)
 	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBodySize))
@@ -59,6 +87,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	model, _ := reqBody["model"].(string)
 	logEntry.Model = model
 
+	// Log policy lookup to detailed logger
+	debugLog("Policy loaded for token %s", safePrefix(tokenHash, 16))
+	debugLog("BaseKeyEnv: %s", pol.BaseKeyEnv)
+
 	resolved := pol.ResolveForModel(model)
 
 	// Attach metadata to log entry
@@ -68,8 +100,22 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 	// Resolve provider config for auth, headers, and chat path
 	var providerCfg *config.ProviderConfig
-	if resolved.ProviderName != "" {
-		if pc, ok := h.providers[resolved.ProviderName]; ok {
+	providerName := resolved.ProviderName
+
+	// If no provider from routing, try policy's default provider
+	if providerName == "" && pol.DefaultProvider != "" {
+		providerName = pol.DefaultProvider
+		debugLog("Using policy default provider: %s", providerName)
+	}
+
+	// If still no provider, try handler's default provider
+	if providerName == "" && h.defaultProvider != "" {
+		providerName = h.defaultProvider
+		debugLog("Using handler default provider: %s", providerName)
+	}
+
+	if providerName != "" {
+		if pc, ok := h.providers[providerName]; ok {
 			providerCfg = &pc
 		}
 	}
@@ -268,8 +314,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			}
 
 			// Resolve the real API key from env
+			debugLog("Loading env var: %s", resolved.BaseKeyEnv)
 			realKey := os.Getenv(resolved.BaseKeyEnv)
 			if realKey == "" {
+				debugLog("ERROR: Env var %s not set", resolved.BaseKeyEnv)
 				logEntry.StatusCode = http.StatusInternalServerError
 				logEntry.Error = fmt.Sprintf("base key env %q is not set", resolved.BaseKeyEnv)
 				httpError(w, http.StatusInternalServerError, logEntry.Error)
@@ -304,22 +352,27 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				upstreamURL.RawQuery = q.Encode()
 			}
 
+			debugLog("Upstream call: %s %s", r.Method, upstreamURL.String())
+
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			proxyReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL.String(), bytes.NewReader(newBody))
 			if err != nil {
 				cancel()
+				debugLog("Error creating upstream request: %v", err)
 				logEntry.StatusCode = http.StatusInternalServerError
 				logEntry.Error = "failed to create upstream request"
 				httpError(w, http.StatusInternalServerError, logEntry.Error)
 				return
 			}
 
-			// Remove client's Authorization header before copying, since we'll set provider-specific auth
+			// Remove client's auth headers before copying, since we'll set provider-specific auth
 			clientHeaders := r.Header.Clone()
 			clientHeaders.Del("Authorization")
+			clientHeaders.Del("x-api-key")
 			copyHeaders(clientHeaders, proxyReq.Header)
 
 			// Set auth based on provider scheme
+			debugLog("Auth scheme: %s", authScheme)
 			switch authScheme {
 			case "header":
 				authHeader := "Authorization"
@@ -327,10 +380,13 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 					authHeader = providerCfg.AuthHeader
 				}
 				if authHeader != "" {
+					debugLog("Setting header %s with real API key", authHeader)
 					proxyReq.Header.Set(authHeader, realKey)
 				}
 			case "query":
+				debugLog("Setting query parameter 'key' with real API key")
 			default: // "bearer"
+				debugLog("Setting Authorization: Bearer header with real API key")
 				proxyReq.Header.Set("Authorization", "Bearer "+realKey)
 			}
 
@@ -345,13 +401,17 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			proxyReq.Header.Set("X-Client-Request-Id", clientRequestID)
 
 			client := &http.Client{}
+			upstreamStart := time.Now()
 			resp, err := client.Do(proxyReq)
+			upstreamDuration := time.Since(upstreamStart)
 			if err != nil {
 				cancel()
+				debugLog("Upstream request error: %v", err)
 				lastErr = err
 				retryCount++
 				continue
 			}
+			debugLog("Upstream response: %d %s (duration: %dms)", resp.StatusCode, resp.Status, upstreamDuration.Milliseconds())
 
 			// Check if we should retry based on status code
 			if shouldRetry(resolved.Retry, resp.StatusCode) && (attempt < maxAttempts-1 || tryModel != modelsToTry[len(modelsToTry)-1]) {

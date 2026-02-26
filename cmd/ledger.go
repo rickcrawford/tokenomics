@@ -64,8 +64,8 @@ func getLedgerDir() string {
 	}
 	// Try loading from config
 	cfg, err := config.Load(cfgFile)
-	if err == nil && cfg.Ledger.Dir != "" {
-		return cfg.Ledger.Dir
+	if err == nil {
+		return cfg.Ledger.Dir // Already resolved to cfg.Dir in config.Load()
 	}
 	return ".tokenomics"
 }

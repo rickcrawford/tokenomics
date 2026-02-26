@@ -20,6 +20,6 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ./config.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: .tokenomics/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "", "database path (overrides config)")
 }
