@@ -145,8 +145,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		} else {
 			sessionLedger = l
 			defer func() {
+				log.Printf("Ledger Close() called for session %s", l.SessionID())
 				if err := sessionLedger.Close(); err != nil {
 					log.Printf("Warning: ledger close error: %v", err)
+				} else {
+					log.Printf("Ledger closed successfully for session %s", l.SessionID())
 				}
 			}()
 			log.Printf("Session ledger enabled (dir=%s, session=%s)", cfg.Ledger.Dir, l.SessionID())
@@ -163,7 +166,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		handler.SetDefaultProvider(cfg.DefaultProvider)
 	}
 	if sessionLedger != nil {
+		log.Printf("Setting ledger on handler (sessionID=%s)", sessionLedger.SessionID())
 		handler.SetLedger(sessionLedger)
+	} else {
+		log.Printf("SessionLedger is nil, handler will not record to ledger")
 	}
 
 	// Wire up Redis memory writer if Redis session backend is configured

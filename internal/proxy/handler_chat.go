@@ -503,8 +503,12 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			if err != nil {
 				logEntry.StatusCode = http.StatusBadGateway
 				logEntry.Error = "failed to read upstream response"
+				debugLog("Error reading upstream response: %v", err)
 				httpError(w, http.StatusBadGateway, logEntry.Error)
 				h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, 0, true)
+				// Still record to ledger even on error
+				h.recordLedgerEntry(logEntry, tokenHash, tryModel, resolved.ProviderName,
+					inputTokens, 0, http.StatusBadGateway, stream, retryCount, nil)
 				return
 			}
 
@@ -719,8 +723,12 @@ func (h *Handler) countResponseTokens(body []byte, tokenHash string) int {
 func (h *Handler) recordLedgerEntry(logEntry *RequestLog, tokenHash, model, provider string,
 	inputTokens, outputTokens, statusCode int, stream bool, retryCount int, providerMeta *ledger.ProviderMeta) {
 	if h.ledger == nil {
+		debugLog("recordLedgerEntry: ledger is nil, skipping")
 		return
 	}
+
+	debugLog("recordLedgerEntry: recording request - model=%s, provider=%s, input=%d, output=%d, status=%d",
+		model, provider, inputTokens, outputTokens, statusCode)
 
 	entry := ledger.RequestEntry{
 		Timestamp:         time.Now().UTC(),

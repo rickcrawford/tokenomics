@@ -134,7 +134,9 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 	logEntry.StatusCode = lw.statusCode
 
 	// Record to ledger (without token counts for passthrough)
+	debugLog("Passthrough handler: ledger=%v, providerName=%s, statusCode=%d", h.ledger != nil, providerName, lw.statusCode)
 	if h.ledger != nil {
+		debugLog("Passthrough: calling recordLedgerEntry")
 		h.recordLedgerEntry(logEntry, tokenHash, "", providerName, 0, 0, lw.statusCode, false, 0, nil)
 	}
 }
