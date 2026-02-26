@@ -170,6 +170,29 @@ func TestDirMemoryWriter_DateSubdirectory(t *testing.T) {
 	}
 }
 
+func TestDirMemoryWriter_SessionIDPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+
+	w, err := NewDirMemoryWriter(dir, "{date}_{session_id}.md")
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	sessionID := "sess1234abcdef5678"
+	if err := w.Append(sessionID, "user", "gpt-4", "Hello"); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	resolved := w.ResolvePath(sessionID)
+	if _, err := os.Stat(resolved); os.IsNotExist(err) {
+		t.Fatalf("expected file at %s to exist", resolved)
+	}
+	if !strings.Contains(filepath.Base(resolved), "sess1234abcdef56") {
+		t.Errorf("expected filename to include truncated session id, got %s", filepath.Base(resolved))
+	}
+}
+
 func TestDirMemoryWriter_DefaultPattern(t *testing.T) {
 	dir := t.TempDir()
 
@@ -300,5 +323,43 @@ func TestFileMemoryWriter_ConcurrentWrites(t *testing.T) {
 	count := strings.Count(string(data), "---")
 	if count != 10 {
 		t.Errorf("expected 10 entries, found %d separators", count)
+	}
+}
+
+// TestDirMemoryWriter_CloseReleasesHandles verifies all open handles closed on Close()
+func TestDirMemoryWriter_CloseReleasesHandles(t *testing.T) {
+	dir := t.TempDir()
+
+	w, err := NewDirMemoryWriter(dir, "{token_hash}.md")
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+
+	// Write to multiple sessions
+	sessions := []string{
+		"aaaa1111bbbb2222cccc3333",
+		"dddd4444eeee5555ffff6666",
+		"1111aaaa2222bbbb3333cccc",
+	}
+
+	for _, s := range sessions {
+		if err := w.Append(s, "user", "gpt-4", "content"); err != nil {
+			t.Fatalf("append failed: %v", err)
+		}
+	}
+
+	// Should have 3 open file handles
+	if len(w.files) != 3 {
+		t.Errorf("expected 3 open files, got %d", len(w.files))
+	}
+
+	// Close the writer
+	if err := w.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	// All handles should be released
+	if len(w.files) != 0 {
+		t.Errorf("expected 0 open files after close, got %d", len(w.files))
 	}
 }

@@ -2,57 +2,32 @@ package proxy
 
 import (
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
 	"time"
 )
 
-// DetailedLogger writes detailed logs to a file
+// DetailedLogger writes detailed logs via the shared proxy logger.
 type DetailedLogger struct {
-	file   *os.File
-	logger *log.Logger
 }
 
-// NewDetailedLogger creates a new detailed logger for the proxy
+// NewDetailedLogger creates a detailed logger using shared logging.
 func NewDetailedLogger() *DetailedLogger {
-	var logFile string
+	return &DetailedLogger{}
+}
 
-	// Try home directory first
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		logDir := filepath.Join(homeDir, ".tokenomics")
-		os.MkdirAll(logDir, 0o700)
-		logFile = filepath.Join(logDir, "proxy-detailed.log")
-	} else {
-		// Fallback to /tmp
-		logFile = "/tmp/tokenomics-proxy-detailed.log"
-	}
-
-	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return &DetailedLogger{
-			logger: log.New(os.Stderr, "[DETAILED] ", log.LstdFlags),
-		}
-	}
-
-	return &DetailedLogger{
-		file:   f,
-		logger: log.New(f, "[DETAILED] ", log.LstdFlags),
-	}
+// NewDetailedLoggerWithDir creates a detailed logger.
+// Directory is accepted for compatibility with existing call sites.
+func NewDetailedLoggerWithDir(dir string) *DetailedLogger {
+	return &DetailedLogger{}
 }
 
 // Log writes a message
 func (dl *DetailedLogger) Log(msg string) {
-	if dl.logger != nil {
-		dl.logger.Println(msg)
-	}
+	debugLog("[detailed] %s", msg)
 }
 
 // Logf writes a formatted message
 func (dl *DetailedLogger) Logf(format string, args ...interface{}) {
-	if dl.logger != nil {
-		dl.logger.Printf(format+"\n", args...)
-	}
+	debugLog("[detailed] "+format, args...)
 }
 
 // maskValue masks sensitive values for logging
@@ -137,19 +112,21 @@ func (dl *DetailedLogger) LogProxyShutdown() {
 
 // Close closes the logger
 func (dl *DetailedLogger) Close() error {
-	if dl.file != nil {
-		return dl.file.Close()
-	}
 	return nil
 }
 
 var globalDetailedLogger *DetailedLogger
 
 func init() {
-	globalDetailedLogger = NewDetailedLogger()
+	globalDetailedLogger = &DetailedLogger{}
 }
 
 // GetDetailedLogger returns the global detailed logger
 func GetDetailedLogger() *DetailedLogger {
 	return globalDetailedLogger
+}
+
+// InitDetailedLogger reinitializes the global detailed logger with a configured directory
+func InitDetailedLogger(dir string) {
+	globalDetailedLogger = &DetailedLogger{}
 }

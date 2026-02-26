@@ -94,7 +94,7 @@ func TestLoadProviders_MissingFile(t *testing.T) {
 	if err == nil {
 		// This should fail since explicit path doesn't exist
 		// But viper may handle it differently
-		if providers != nil && len(providers) > 0 {
+		if len(providers) > 0 {
 			t.Fatal("expected nil/empty providers for missing file")
 		}
 	}
@@ -192,6 +192,9 @@ server:
 	if cfg.Logging.Format != "json" {
 		t.Errorf("Logging.Format = %q, want json", cfg.Logging.Format)
 	}
+	if cfg.Logging.ProxyLogFile != "proxy.log" {
+		t.Errorf("Logging.ProxyLogFile = %q, want proxy.log", cfg.Logging.ProxyLogFile)
+	}
 }
 
 func TestLoadConfig_LoggingOverrides(t *testing.T) {
@@ -205,6 +208,7 @@ logging:
   request_body: true
   hide_token_hash: true
   disable_request: true
+  proxy_log_file: custom-proxy.log
 `
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(configYAML), 0644); err != nil {
@@ -230,6 +234,9 @@ logging:
 	}
 	if !cfg.Logging.DisableRequest {
 		t.Error("Logging.DisableRequest should be true")
+	}
+	if cfg.Logging.ProxyLogFile != "custom-proxy.log" {
+		t.Errorf("Logging.ProxyLogFile = %q, want custom-proxy.log", cfg.Logging.ProxyLogFile)
 	}
 }
 

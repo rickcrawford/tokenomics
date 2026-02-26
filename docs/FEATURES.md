@@ -53,7 +53,7 @@ Complete feature reference for Tokenomics, organized by category. Every feature 
 | Git context | Captures branch, start commit, and end commit for cost-per-feature and cost-per-branch analysis. | [Ledger](LEDGER.md#git-context) |
 | Provider metadata | Normalized across providers: cached tokens, reasoning tokens, actual model served, finish reason, upstream rate limits. | [Ledger](LEDGER.md#provider-metadata) |
 | Rollup dimensions | Aggregated views by model, by provider, and by wrapper token. | [Ledger](LEDGER.md#rollup-dimensions) |
-| Ledger memory | Optional conversation content in `memory/` subdirectory, `.gitignore`-able separately from session data. | [Ledger](LEDGER.md#memory-files) |
+| Ledger memory | Optional conversation content in `memory/` subdirectory, with one markdown file per session (`<date>_<session_id>.md`). | [Ledger](LEDGER.md#memory-files) |
 
 ## Observability
 

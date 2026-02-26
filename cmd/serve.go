@@ -159,9 +159,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Get hash key
 	hashKey := getHashKey(cfg.Security.HashKeyEnv)
 
+	// Initialize proxy logger with configured directory and file name.
+	proxy.InitDebugLogger(cfg.Dir, cfg.Logging.ProxyLogFile)
+
 	// Create proxy handler with provider configs and event emitter
 	handler := proxy.NewHandler(tokenStore, sessStore, hashKey, cfg.Server.UpstreamURL, cfg.Providers, emitter)
 	handler.SetLogging(cfg.Logging)
+	handler.SetDebugLogDir(cfg.Dir) // Set the configured directory for debug logs
 	if cfg.DefaultProvider != "" {
 		handler.SetDefaultProvider(cfg.DefaultProvider)
 	}

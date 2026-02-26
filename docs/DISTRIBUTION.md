@@ -21,7 +21,8 @@ git push origin v1.2.3
 The GitHub Actions workflow will:
 1. Build binaries for all supported platforms
 2. Create checksums for verification
-3. Create a GitHub Release with all binaries
+3. Attach `install.sh` and `install-latest.sh` to the release
+4. Create a GitHub Release with all assets
 
 ### Supported Platforms
 
@@ -37,7 +38,7 @@ Binary releases are built for:
 ### Quick Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rickcrawford/tokenomics/main/install.sh | bash
+curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/install.sh | bash
 ```
 
 This script:
@@ -105,7 +106,7 @@ export TOKENOMICS_HASH_KEY="your-secret-hash-key"
 ```yaml
 - name: Install Tokenomics
   run: |
-    curl -fsSL https://raw.githubusercontent.com/rickcrawford/tokenomics/main/install.sh | bash
+    curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/install.sh | bash
     export PATH="$PWD:$PATH"
     tokenomics --help
 ```
@@ -117,7 +118,7 @@ FROM ubuntu:22.04
 
 RUN apt-get update && apt-get install -y curl
 
-RUN curl -fsSL https://raw.githubusercontent.com/rickcrawford/tokenomics/main/install.sh | bash
+RUN curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/install.sh | bash
 
 ENTRYPOINT ["tokenomics"]
 ```
@@ -126,7 +127,7 @@ ENTRYPOINT ["tokenomics"]
 
 ```yaml
 - name: Install Tokenomics
-  shell: curl -fsSL https://raw.githubusercontent.com/rickcrawford/tokenomics/main/install.sh | bash
+  shell: curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/install.sh | bash
 ```
 
 ## Build Workflow Details
@@ -137,19 +138,19 @@ The `.github/workflows/build-release.yml` workflow:
    - Push to a tag matching `v*` (e.g., `v1.0.0`)
    - Manual trigger via `workflow_dispatch`
 
-2. **Build matrix:**
-   - Runs builds in parallel for all platform combinations
-   - Each build produces a platform-specific archive
+2. **Build strategy:**
+   - Uses cross-compilation from Linux for all supported platforms
+   - Produces platform-specific archives in one job
 
 3. **Artifacts:**
    - Linux/macOS: `.tar.gz` archives with `tokenomics` binary
    - Windows: `.zip` archive with `tokenomics.exe`
-   - SHA256 checksums for each archive
+   - `checksums.txt` with SHA256 hashes
+   - `install.sh` and `install-latest.sh`
 
 4. **Release creation:**
-   - Collects all artifacts
-   - Creates GitHub Release
-   - Attaches binaries and checksums
+   - Creates GitHub Release on version tags
+   - Attaches binaries, checksums, and install scripts
    - Generates release notes from commits
 
 ## Checksums
@@ -157,12 +158,12 @@ The `.github/workflows/build-release.yml` workflow:
 Verify downloaded binaries using checksums:
 
 ```bash
-# Download archive and checksum
+# Download archive and checksums
 curl -fsSL -O https://github.com/rickcrawford/tokenomics/releases/download/v1.2.3/tokenomics-linux-amd64.tar.gz
-curl -fsSL -O https://github.com/rickcrawford/tokenomics/releases/download/v1.2.3/tokenomics-linux-amd64.tar.gz.sha256
+curl -fsSL -O https://github.com/rickcrawford/tokenomics/releases/download/v1.2.3/checksums.txt
 
 # Verify
-sha256sum -c tokenomics-linux-amd64.tar.gz.sha256
+grep "tokenomics-linux-amd64.tar.gz" checksums.txt | shasum -a 256 -c
 ```
 
 ## Troubleshooting
@@ -209,7 +210,7 @@ Refer to [TLS.md](TLS.md) for platform-specific certificate installation instruc
 
 ```bash
 # Build and copy to shared location
-curl -fsSL https://raw.githubusercontent.com/rickcrawford/tokenomics/main/install.sh | bash
+curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/install.sh | bash
 cp tokenomics /shared/bin/
 chmod 755 /shared/bin/tokenomics
 
@@ -224,7 +225,7 @@ Build and push a Docker image with Tokenomics pre-installed:
 ```dockerfile
 FROM ubuntu:22.04
 RUN apt-get update && apt-get install -y curl
-RUN curl -fsSL https://raw.githubusercontent.com/rickcrawford/tokenomics/main/install.sh | bash
+RUN curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/install.sh | bash
 ```
 
 ### Approach 3: Package Manager

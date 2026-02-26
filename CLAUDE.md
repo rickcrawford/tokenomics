@@ -37,9 +37,19 @@ docs/                  Feature documentation
 - CLI uses Cobra with `cmd/root.go` as the entrypoint
 - Config loaded via Viper from `config.yaml` or `$HOME/.tokenomics/config.yaml`
 - Env prefix: `TOKENOMICS_` (e.g. `TOKENOMICS_HASH_KEY`)
+- `.tokenomics` directory: Always relative to the current working directory where the command runs (e.g. `tokenomics serve` from project root creates `.tokenomics/`). Override with `TOKENOMICS_DIR` env var or `dir:` in config.yaml to use a different location (including absolute paths like `~/.tokenomics`).
 - Policies are JSON, stored AES-256-GCM encrypted in BoltDB
 - Rules use object format: `{"type":"regex|keyword|pii", "action":"fail|warn|log|mask", "scope":"input|output|both"}`
 - Event emitter uses `Emitter` interface; pass `nil` for no-op in tests
+
+## Memory Efficiency Conventions
+
+- **Shared HTTP Client:** Always use a shared `*http.Client` on the `Handler` struct (initialized in `NewHandler()`). Never create `&http.Client{}` inside request handlers — each new client bypasses Go's connection pooling.
+- **Body Reads:** Use `io.LimitReader` for all body reads (request and response). Reuse `maxRequestBodySize` (10 MB) and `maxResponseBodySize` (32 MB) constants to prevent unbounded memory allocation.
+- **SSE Parsing:** Use `bytes.Buffer` with incremental `ReadBytes('\n')` for O(1)-per-chunk processing instead of string concatenation and `strings.Split`.
+- **Content Accumulation:** Cap assistant response content (`contentBuilder.Len() < maxMemoryContentSize`) and user message accumulation (`partsSize < maxMemoryContentSize`). Default cap is 512 KB.
+- **Persistent Loggers:** Use `sync.Once` to initialize file handles once (e.g., debug log) instead of opening/closing on every call.
+- **File Handles:** Close stale file handles when paths change (e.g., date rollover in `DirMemoryWriter.getFile()`).
 
 ## Documentation
 

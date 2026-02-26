@@ -471,6 +471,40 @@ func TestRecordMemoryNoWriter(t *testing.T) {
 	}
 }
 
+func TestRecordMemoryUsesSessionFile(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, true)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	if err := l.RecordMemory("tok1", "user", "gpt-4", "hello"); err != nil {
+		t.Fatalf("RecordMemory: %v", err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	memDir := filepath.Join(dir, "memory")
+	files, err := os.ReadDir(memDir)
+	if err != nil {
+		t.Fatalf("read memory dir: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 memory file, got %d", len(files))
+	}
+
+	wantPrefix := time.Now().UTC().Format("2006-01-02") + "_" + l.SessionID()
+	got := files[0].Name()
+	if filepath.Ext(got) != ".md" {
+		t.Fatalf("expected .md memory file, got %s", got)
+	}
+	base := got[:len(got)-3] // trim .md
+	if base != wantPrefix {
+		t.Fatalf("expected memory filename %q, got %q", wantPrefix+".md", got)
+	}
+}
+
 func TestTokenRollupMultiModel(t *testing.T) {
 	dir := t.TempDir()
 	l, err := Open(dir, false)

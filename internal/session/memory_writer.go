@@ -55,7 +55,7 @@ func (w *FileMemoryWriter) Close() error {
 
 // DirMemoryWriter writes per-session files into a directory. Each session
 // (identified by sessionID) gets its own file based on a configurable name
-// pattern. Supported placeholders: {token_hash}, {date}.
+// pattern. Supported placeholders: {token_hash}, {session_id}, {date}.
 type DirMemoryWriter struct {
 	mu      sync.Mutex
 	dir     string
@@ -65,6 +65,7 @@ type DirMemoryWriter struct {
 
 // NewDirMemoryWriter creates a writer that produces per-session files under dir.
 // The pattern supports placeholders: {token_hash} (replaced with sessionID),
+// {session_id} (replaced with sessionID),
 // {date} (replaced with YYYY-MM-DD). Example: "{date}/{token_hash}.md".
 func NewDirMemoryWriter(dir, pattern string) (*DirMemoryWriter, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -82,7 +83,9 @@ func NewDirMemoryWriter(dir, pattern string) (*DirMemoryWriter, error) {
 
 // ResolvePath returns the file path for a given session ID without opening the file.
 func (w *DirMemoryWriter) ResolvePath(sessionID string) string {
-	name := strings.ReplaceAll(w.pattern, "{token_hash}", safeSessionPrefix(sessionID, 16))
+	prefix := safeSessionPrefix(sessionID, 16)
+	name := strings.ReplaceAll(w.pattern, "{token_hash}", prefix)
+	name = strings.ReplaceAll(name, "{session_id}", prefix)
 	name = strings.ReplaceAll(name, "{date}", time.Now().UTC().Format("2006-01-02"))
 	return filepath.Join(w.dir, name)
 }
@@ -92,6 +95,17 @@ func (w *DirMemoryWriter) getFile(sessionID string) (*os.File, error) {
 
 	if f, ok := w.files[path]; ok {
 		return f, nil
+	}
+
+	// Close stale file handles for this session with different paths (e.g., date rollover)
+	sessionHash := safeSessionPrefix(sessionID, 16)
+	for existingPath, f := range w.files {
+		// Check if this is for the same session but different path
+		if strings.Contains(existingPath, sessionHash) && existingPath != path {
+			// Different path for same session (e.g., date changed) - close and remove
+			f.Close()
+			delete(w.files, existingPath)
+		}
 	}
 
 	// Create subdirectories if the pattern includes them (e.g. "{date}/file.md")

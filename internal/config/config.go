@@ -100,6 +100,7 @@ type LoggingConfig struct {
 	ResponseBody   bool   `mapstructure:"response_body"`   // Log full response bodies (default false)
 	HideTokenHash  bool   `mapstructure:"hide_token_hash"` // Mask token hashes in logs (default false)
 	DisableRequest bool   `mapstructure:"disable_request"` // Suppress per-request structured logs (default false)
+	ProxyLogFile   string `mapstructure:"proxy_log_file"`  // Proxy debug log filename under `dir` (default "proxy.log")
 }
 
 // RemoteConfig configures loading tokens and config from a central server.
@@ -220,6 +221,7 @@ func Load(cfgFile string) (*Config, error) {
 	v.SetDefault("security.encryption_key_env", "TOKENOMICS_ENCRYPTION_KEY")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
+	v.SetDefault("logging.proxy_log_file", "proxy.log")
 	v.SetDefault("ledger.enabled", true)                    // Enable session ledger by default
 	v.SetDefault("ledger.dir", "")                          // empty = derive from dir at use time
 	v.SetDefault("ledger.memory", true)                     // Record conversation content
@@ -371,6 +373,7 @@ func EnsureDir(dir string) error {
 logging:
   level: info
   format: json
+  proxy_log_file: proxy.log
 `
 		if err := os.WriteFile(configPath, []byte(defaultConfig), 0o644); err != nil {
 			return fmt.Errorf("write default config: %w", err)

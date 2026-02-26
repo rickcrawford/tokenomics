@@ -28,60 +28,31 @@ const maxResponseBodySize = 32 * 1024 * 1024
 
 // debugLogger is a persistent logger for proxy debug output
 var (
-	debugLogger     *log.Logger
-	debugOnce       sync.Once
-	debugLogDirPath string // Set via InitDebugLogger before first use
-	debugLogFileName string
+	debugLogger *log.Logger
+	debugOnce   sync.Once
 )
 
-// InitDebugLogger initializes the debug logger with the configured directory
-func InitDebugLogger(dir, fileName string) {
-	debugLogDirPath = dir
-	debugLogFileName = fileName
-	debugOnce.Do(initDebugLogger)
-}
-
-// debugLog writes debug information to a persistent logger
+// debugLog writes debug information to ~/.tokenomics/proxy-debug.log (or /tmp/tokenomics-debug.log as fallback)
 func debugLog(format string, args ...interface{}) {
-	// If not initialized, just log to stdout via log package
-	if debugLogger == nil && debugLogDirPath == "" {
-		log.Printf("[debug] %s", fmt.Sprintf(format, args...))
-		return
-	}
-	// Initialize on first use if directory was set
-	if debugLogger == nil {
-		debugOnce.Do(initDebugLogger)
-	}
-	if debugLogger != nil {
-		debugLogger.Printf(format, args...)
-	}
-}
-
-// initDebugLogger initializes the persistent debug logger using the configured directory
-func initDebugLogger() {
 	var logFile string
 
-	// Use configured directory, or default to .tokenomics
-	if debugLogDirPath == "" {
-		debugLogDirPath = ".tokenomics"
-	}
-	if debugLogFileName == "" {
-		debugLogFileName = "proxy.log"
-	}
-
-	// Ensure directory exists
-	if err := os.MkdirAll(debugLogDirPath, 0o755); err == nil {
-		logFile = filepath.Join(debugLogDirPath, debugLogFileName)
+	// Try home directory first
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		logDir := filepath.Join(homeDir, ".tokenomics")
+		os.MkdirAll(logDir, 0o700)
+		logFile = filepath.Join(logDir, "proxy-debug.log")
 	} else {
-		// Fallback to /tmp if directory can't be created
-		logFile = "/tmp/tokenomics-proxy.log"
+		// Fallback to /tmp
+		logFile = "/tmp/tokenomics-debug.log"
 	}
 
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return
 	}
-	debugLogger = log.New(f, "", log.LstdFlags)
+	defer f.Close()
+	msg := fmt.Sprintf("[%s] %s\n", time.Now().Format("15:04:05.000"), fmt.Sprintf(format, args...))
+	f.WriteString(msg)
 }
 
 func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time) {
@@ -453,13 +424,13 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 			// Check if we should retry based on status code
 			if shouldRetry(resolved.Retry, resp.StatusCode) && (attempt < maxAttempts-1 || tryModel != modelsToTry[len(modelsToTry)-1]) {
-			// Discard response body without allocating; cap size to prevent abuse
-			io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBodySize))
-			resp.Body.Close()
-			cancel()
-			lastResp = resp
-			retryCount++
-			continue
+				respBody, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				cancel()
+				lastBody = respBody
+				lastResp = resp
+				retryCount++
+				continue
 			}
 
 			// Success or non-retryable error — use this response
@@ -480,48 +451,27 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			// Record token usage for rate limiter
 			h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, inputTokens)
 
-// Record full request body to memory and ledger (before any modifications)
-			reqBodyStr := string(bodyBytes)
-			if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
-				if err := memWriter.Append(tokenHash, "request", model, reqBodyStr); err != nil {
-					debugLog("Failed to record request to memory: %v", err)
-				}
-			}
-			// Also record to ledger if enabled
-			if h.ledger != nil {
-				if err := h.ledger.RecordMemory(tokenHash, "request", model, reqBodyStr); err != nil {
-					debugLog("Failed to record request to ledger: %v", err)
-				}
-			}
-
-			// Collect user content for memory logging.
+			// Collect user content for memory logging
 			var userContent string
-			var parts []string
-			for _, m := range messages {
-				msg, ok := m.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				role, _ := msg["role"].(string)
-				content, _ := msg["content"].(string)
-				if content != "" && role == "user" {
-					parts = append(parts, content)
-				}
-			}
-			userContent = strings.Join(parts, "\n\n")
-
-			if stream && resp.StatusCode == http.StatusOK {
-				outputTokens, assistantContent, rawStreamResponse, streamUpstreamID, streamLastChunk, streamTruncated := h.handleStreamingResponse(w, resp, tokenHash, tryModel)
-				resp.Body.Close()
-
-				if streamTruncated {
-					debugLog("Streaming response capture truncated at %d bytes", maxResponseBodySize)
-				}
-				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
-					if err := memWriter.Append(tokenHash, "response", tryModel, string(rawStreamResponse)); err != nil {
-						debugLog("Failed to record response to memory: %v", err)
+			if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+				var parts []string
+				for _, m := range messages {
+					msg, ok := m.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					role, _ := msg["role"].(string)
+					content, _ := msg["content"].(string)
+					if content != "" && role == "user" {
+						parts = append(parts, content)
 					}
 				}
+				userContent = strings.Join(parts, "\n\n")
+			}
+
+			if stream && resp.StatusCode == http.StatusOK {
+				outputTokens, assistantContent, streamUpstreamID, streamLastChunk := h.handleStreamingResponse(w, resp, tokenHash, tryModel)
+				resp.Body.Close()
 				logEntry.StatusCode = resp.StatusCode
 				logEntry.OutputTokens = outputTokens
 				logEntry.UpstreamID = streamUpstreamID
@@ -534,14 +484,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
 					if userContent != "" {
-						if err := memWriter.Append(tokenHash, "user", tryModel, userContent); err != nil {
-							debugLog("Failed to record user to memory: %v", err)
-						}
+						memWriter.Append(tokenHash, "user", tryModel, userContent)
 					}
 					if assistantContent != "" {
-						if err := memWriter.Append(tokenHash, "assistant", tryModel, assistantContent); err != nil {
-							debugLog("Failed to record assistant to memory: %v", err)
-						}
+						memWriter.Append(tokenHash, "assistant", tryModel, assistantContent)
 					}
 				}
 
@@ -562,7 +508,7 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 			// Buffered response
 			debugLog("Reading upstream response body (status=%d, content-length=%s)", resp.StatusCode, resp.Header.Get("Content-Length"))
-			respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
+			respBody, err := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				logEntry.StatusCode = http.StatusBadGateway
@@ -594,24 +540,13 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 			var assistantContent string
 			if !isError {
-				// Record full response to memory (non-streaming)
-				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
-					respBodyStr := string(respBody)
-					if err := memWriter.Append(tokenHash, "response", tryModel, respBodyStr); err != nil {
-						debugLog("Failed to record response to memory: %v", err)
-					}
-				}
 				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
 					if userContent != "" {
-						if err := memWriter.Append(tokenHash, "user", tryModel, userContent); err != nil {
-							debugLog("Failed to record user to memory: %v", err)
-						}
+						memWriter.Append(tokenHash, "user", tryModel, userContent)
 					}
 					assistantContent = extractAssistantContent(respBody)
 					if assistantContent != "" {
-						if err := memWriter.Append(tokenHash, "assistant", tryModel, assistantContent); err != nil {
-							debugLog("Failed to record assistant to memory: %v", err)
-						}
+						memWriter.Append(tokenHash, "assistant", tryModel, assistantContent)
 					}
 				}
 			}
@@ -634,15 +569,6 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				if assistantContent != "" {
 					debugLog("Recording assistant content: %d chars", len(assistantContent))
 					h.ledger.RecordMemory(tokenHash, "assistant", tryModel, assistantContent)
-					// Record request and response to ledger
-					reqBodyStr := string(bodyBytes)
-					if err := h.ledger.RecordMemory(tokenHash, "request", tryModel, reqBodyStr); err != nil {
-						debugLog("Failed to record request to ledger: %v", err)
-					}
-					respBodyStr := string(respBody)
-					if err := h.ledger.RecordMemory(tokenHash, "response", tryModel, respBodyStr); err != nil {
-						debugLog("Failed to record response to ledger: %v", err)
-					}
 				}
 			} else {
 				debugLog("Skipping memory recording: ledger=%v, isError=%v", h.ledger != nil, isError)
@@ -691,12 +617,12 @@ func shouldRetry(cfg *policy.RetryConfig, statusCode int) bool {
 
 // handleStreamingResponse streams the upstream SSE response to the client,
 // counting output tokens and extracting the upstream completion ID.
-// Returns (outputTokens, assistantContent, rawResponse, upstreamID, lastChunk, truncated).
-func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string, []byte, string, map[string]interface{}, bool) {
+// Returns (outputTokens, assistantContent, upstreamID, lastChunk).
+func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string, string, map[string]interface{}) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		httpError(w, http.StatusInternalServerError, "streaming not supported")
-		return 0, "", nil, "", nil, false
+		return 0, "", "", nil
 	}
 
 	copyHeaders(resp.Header, w.Header())
@@ -708,11 +634,8 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 	scanner := bufio.NewScanner(resp.Body)
 	var totalOutputTokens int
 	var contentBuilder strings.Builder
-	var rawResponse bytes.Buffer
 	var upstreamID string
 	var lastChunk map[string]interface{}
-	var capturedBytes int64
-	var truncated bool
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -720,19 +643,6 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 		// Write the line through to the client
 		fmt.Fprintf(w, "%s\n", line)
 		flusher.Flush()
-
-		if capturedBytes < maxResponseBodySize {
-			rawLine := line + "\n"
-			remaining := int64(maxResponseBodySize) - capturedBytes
-			if int64(len(rawLine)) > remaining {
-				rawLine = rawLine[:remaining]
-				truncated = true
-			}
-			rawResponse.WriteString(rawLine)
-			capturedBytes += int64(len(rawLine))
-		} else {
-			truncated = true
-		}
 
 		// Parse SSE data lines for token counting
 		if strings.HasPrefix(line, "data: ") {
@@ -796,63 +706,36 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 		h.sessions.AddUsage(tokenHash, int64(totalOutputTokens))
 	}
 
-	return totalOutputTokens, contentBuilder.String(), rawResponse.Bytes(), upstreamID, lastChunk, truncated
+	return totalOutputTokens, contentBuilder.String(), upstreamID, lastChunk
 }
 
 func (h *Handler) countResponseTokens(body []byte, tokenHash string) int {
 	var resp map[string]interface{}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		debugLog("countResponseTokens: failed to unmarshal JSON: %v", err)
 		return 0
 	}
-
-	// Debug: log what we got
-	debugLog("countResponseTokens: response keys: %v", getKeys(resp))
-
 	usage, ok := resp["usage"].(map[string]interface{})
 	if !ok {
-		debugLog("countResponseTokens: no usage field in response, resp=%+v", resp)
 		return 0
 	}
-
-	debugLog("countResponseTokens: usage field: %+v", usage)
 
 	// Try multiple field names for output tokens (different providers use different names)
 	var outputTokens float64
 
-	// Anthropic uses "output_tokens" - could be float64 or int
+	// Anthropic uses "output_tokens"
 	if ot, ok := usage["output_tokens"].(float64); ok {
 		outputTokens = ot
-		debugLog("countResponseTokens: found output_tokens as float64: %v", outputTokens)
-	} else if ot, ok := usage["output_tokens"].(int); ok {
-		outputTokens = float64(ot)
-		debugLog("countResponseTokens: found output_tokens as int: %v", ot)
 	} else if ct, ok := usage["completion_tokens"].(float64); ok {
 		// OpenAI and others use "completion_tokens"
 		outputTokens = ct
-		debugLog("countResponseTokens: found completion_tokens as float64: %v", outputTokens)
-	} else if ct, ok := usage["completion_tokens"].(int); ok {
-		outputTokens = float64(ct)
-		debugLog("countResponseTokens: found completion_tokens as int: %v", ct)
 	} else {
-		debugLog("countResponseTokens: no token field found in usage, usage keys: %v", getKeys(usage))
 		return 0
 	}
 
-	debugLog("countResponseTokens: recording %d output tokens", int64(outputTokens))
 	if outputTokens > 0 {
 		h.sessions.AddUsage(tokenHash, int64(outputTokens))
 	}
 	return int(outputTokens)
-}
-
-// getKeys returns the keys of a map for debugging
-func getKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 // recordLedgerEntry records a request to the session ledger if configured.

@@ -10,98 +10,63 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.os }} ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          # Linux
-          - os: linux
-            arch: amd64
-            runner: ubuntu-latest
-            ext: ''
-          - os: linux
-            arch: arm64
-            runner: ubuntu-latest
-            ext: ''
-
-          # macOS
-          - os: darwin
-            arch: amd64
-            runner: macos-latest
-            ext: ''
-          - os: darwin
-            arch: arm64
-            runner: macos-latest
-            ext: ''
-
-          # Windows
-          - os: windows
-            arch: amd64
-            runner: windows-latest
-            ext: '.exe'
-
+  release:
+    name: Build and publish release assets
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version-file: go.mod
 
-      - name: Build
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-        run: go build -o tokenomics${{ matrix.ext }} .
-
-      - name: Create archive (Linux/macOS)
-        if: matrix.os != 'windows'
+      - name: Build release archives
         run: |
-          tar -czf tokenomics-${{ matrix.os }}-${{ matrix.arch }}.tar.gz tokenomics
-          echo "ASSET=tokenomics-${{ matrix.os }}-${{ matrix.arch }}.tar.gz" >> $GITHUB_ENV
+          set -euo pipefail
+          mkdir -p dist
 
-      - name: Create archive (Windows)
-        if: matrix.os == 'windows'
+          build_unix() {
+            local goos="$1"
+            local goarch="$2"
+            local out="tokenomics-${goos}-${goarch}"
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" go build -trimpath -ldflags="-s -w" -o dist/tokenomics .
+            tar -czf "dist/${out}.tar.gz" -C dist tokenomics
+            rm -f dist/tokenomics
+          }
+
+          build_windows() {
+            local goarch="$1"
+            local out="tokenomics-windows-${goarch}"
+            CGO_ENABLED=0 GOOS=windows GOARCH="${goarch}" go build -trimpath -ldflags="-s -w" -o dist/tokenomics.exe .
+            (cd dist && zip -q "${out}.zip" tokenomics.exe)
+            rm -f dist/tokenomics.exe
+          }
+
+          build_unix linux amd64
+          build_unix linux arm64
+          build_unix darwin amd64
+          build_unix darwin arm64
+          build_windows amd64
+
+          cp install.sh dist/install.sh
+          cp install-latest.sh dist/install-latest.sh
+          chmod +x dist/install.sh dist/install-latest.sh
+
+      - name: Generate checksums
         run: |
-          powershell -Command "Compress-Archive -Path tokenomics.exe -DestinationPath tokenomics-windows-${{ matrix.arch }}.zip"
-          echo "ASSET=tokenomics-windows-${{ matrix.arch }}.zip" >> $GITHUB_ENV
-
-      - name: Calculate checksum
-        run: |
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            certutil -hashfile ${{ env.ASSET }} SHA256
-          else
-            sha256sum ${{ env.ASSET }} > ${{ env.ASSET }}.sha256
-          fi
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: binaries
-          path: |
-            tokenomics-*
-            *.sha256
-
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: binaries
+          set -euo pipefail
+          (cd dist && shasum -a 256 tokenomics-* > checksums.txt)
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: tokenomics-*
+          files: |
+            dist/tokenomics-*
+            dist/checksums.txt
+            dist/install.sh
+            dist/install-latest.sh
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -55,6 +55,7 @@ logging:
   response_body: false       # Log full response bodies
   hide_token_hash: false     # Mask token hashes in logs
   disable_request: false     # Suppress per-request structured logs
+  proxy_log_file: "proxy.log" # Proxy debug log filename under `dir`
 
 events:
   webhooks:
@@ -114,6 +115,7 @@ ledger:
 | `logging.response_body` | `false` | Include full response body in logs. |
 | `logging.hide_token_hash` | `false` | Replace token hashes with `****` in logs. |
 | `logging.disable_request` | `false` | Suppress per-request structured log entries entirely. |
+| `logging.proxy_log_file` | `proxy.log` | Proxy debug log filename created under `dir` (for example `.tokenomics/proxy.log`). |
 | `events.webhooks[].url` | (required) | Webhook endpoint URL. |
 | `events.webhooks[].secret` | (empty) | Shared secret sent as `X-Webhook-Secret`. |
 | `events.webhooks[].signing_key` | (empty) | HMAC-SHA256 signing key for `X-Webhook-Signature`. |
@@ -131,6 +133,10 @@ ledger:
 | `ledger.enabled` | `false` | Enable per-session token tracking to the `.tokenomics/` directory. |
 | `ledger.dir` | `.tokenomics` | Directory for session files and memory logs. |
 | `ledger.memory` | `true` | Record conversation content (user/assistant messages) in memory markdown files. |
+
+### Session Ledger Notes
+
+Session request entries and memory content accumulate in memory until the proxy is restarted. In high-volume deployments (>10K requests/day), restart the proxy periodically (e.g., nightly) to prevent unbounded memory growth. Token counts and usage summaries are durable in the BoltDB ledger; restarting does not lose historical data.
 
 ## Logging
 
@@ -170,6 +176,7 @@ Every config field can be overridden with a `TOKENOMICS_` prefixed environment v
 | `logging.level` | `TOKENOMICS_LOGGING_LEVEL` |
 | `logging.format` | `TOKENOMICS_LOGGING_FORMAT` |
 | `logging.disable_request` | `TOKENOMICS_LOGGING_DISABLE_REQUEST` |
+| `logging.proxy_log_file` | `TOKENOMICS_LOGGING_PROXY_LOG_FILE` |
 | `remote.url` | `TOKENOMICS_REMOTE_URL` |
 | `remote.api_key` | `TOKENOMICS_REMOTE_API_KEY` |
 | `remote.sync` | `TOKENOMICS_REMOTE_SYNC` |

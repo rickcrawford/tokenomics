@@ -65,7 +65,7 @@ Every request produces a structured JSON log with token counts, latency, upstrea
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rickcrawford/tokenomics/main/install.sh | bash
+curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/install.sh | bash
 ```
 
 Or build from source:
@@ -79,6 +79,8 @@ sudo cp bin/tokenomics /usr/local/bin/
 Verify: `tokenomics --help`
 
 ## Quick Start
+
+See the step-by-step guide: [Quick Start](docs/QUICK_START.md).
 
 ```bash
 # Install CA certificate (first time only)
@@ -164,6 +166,7 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 | Topic | Description |
 |-------|-------------|
 | [Features](docs/FEATURES.md) | Complete feature reference organized by category |
+| [Quick Start](docs/QUICK_START.md) | Fast setup and first request in minutes |
 | [Examples](examples/) | Provider configs, sample policies, webhook collector, env template |
 | [Configuration](docs/CONFIGURATION.md) | config.yaml fields, environment variables, CLI flags |
 | [Policies](docs/POLICIES.md) | Policy JSON schema, model filtering, rules, prompts, memory |

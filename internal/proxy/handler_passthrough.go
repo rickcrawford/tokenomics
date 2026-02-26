@@ -1,11 +1,15 @@
 package proxy
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
@@ -85,7 +89,32 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 		return
 	}
 
+	// Extract model and messages from request body for memory recording
+	var requestBody []byte
+	var reqBody map[string]interface{}
+	var model string
+	var userContent string
+	if r.Body != nil {
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBodySize))
+		if err == nil {
+			requestBody = body
+			if err := json.Unmarshal(body, &reqBody); err == nil {
+				if m, ok := reqBody["model"].(string); ok {
+					model = m
+				}
+				userContent = extractUserContentFromRequest(reqBody)
+			}
+			// Restore body for the actual request
+			r.Body = io.NopCloser(bytes.NewReader(body))
+		}
+	}
+
 	lw := newLoggingResponseWriter(w)
+
+	// Streaming handler that extracts tokens without buffering large responses
+	streamWriter := &streamingResponseWriter{
+		ResponseWriter: lw,
+	}
 
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
@@ -130,13 +159,194 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 		},
 	}
 
-	proxy.ServeHTTP(lw, r)
+	proxy.ServeHTTP(streamWriter, r)
 	logEntry.StatusCode = lw.statusCode
 
-	// Record to ledger (without token counts for passthrough)
-	debugLog("Passthrough handler: ledger=%v, providerName=%s, statusCode=%d", h.ledger != nil, providerName, lw.statusCode)
-	if h.ledger != nil {
-		debugLog("Passthrough: calling recordLedgerEntry")
-		h.recordLedgerEntry(logEntry, tokenHash, "", providerName, 0, 0, lw.statusCode, false, 0, nil)
+	// Extract token counts and response content
+	inputTokens, outputTokens := streamWriter.GetTokenCounts()
+	assistantContent := streamWriter.GetAssistantContent()
+
+	// Get raw response content (JSON or SSE, depending on endpoint).
+	responseData := streamWriter.GetResponseContent()
+	if streamWriter.IsTruncated() {
+		debugLog("Passthrough response capture truncated at %d bytes", maxResponseBodySize)
 	}
+
+	if len(responseData) > 0 {
+		// Try to parse as JSON (non-streaming response)
+		var respBody map[string]interface{}
+		if err := json.Unmarshal(responseData, &respBody); err == nil {
+			in, out := extractTokenCountsFromResponse(respBody)
+			if in > 0 {
+				inputTokens = in
+			}
+			if out > 0 {
+				outputTokens = out
+			}
+			if parsed := extractAssistantTextFromResponse(respBody); parsed != "" {
+				assistantContent = parsed
+			}
+		}
+	}
+
+	// Record to ledger
+	debugLog("Passthrough handler: ledger=%v, providerName=%s, statusCode=%d, model=%s, input=%d, output=%d, streaming=%v",
+		h.ledger != nil, providerName, lw.statusCode, model, inputTokens, outputTokens, streamWriter.isStreaming)
+	if h.ledger != nil {
+		debugLog("Passthrough: calling recordLedgerEntry with model=%s", model)
+		h.recordLedgerEntry(logEntry, tokenHash, model, providerName, inputTokens, outputTokens, lw.statusCode, streamWriter.isStreaming, 0, nil)
+	}
+
+	if model != "" {
+		responseForMemory := string(responseData)
+		if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+			if len(requestBody) > 0 {
+				if err := memWriter.Append(tokenHash, "request", model, string(requestBody)); err != nil {
+					debugLog("Passthrough: failed to write request memory: %v", err)
+				}
+			}
+			if responseForMemory != "" {
+				if err := memWriter.Append(tokenHash, "response", model, responseForMemory); err != nil {
+					debugLog("Passthrough: failed to write response memory: %v", err)
+				}
+			}
+			if userContent != "" {
+				if err := memWriter.Append(tokenHash, "user", model, userContent); err != nil {
+					debugLog("Passthrough: failed to write user memory: %v", err)
+				}
+			}
+			if assistantContent != "" {
+				if err := memWriter.Append(tokenHash, "assistant", model, assistantContent); err != nil {
+					debugLog("Passthrough: failed to write assistant memory: %v", err)
+				}
+			}
+		}
+
+		if h.ledger != nil {
+			if len(requestBody) > 0 {
+				h.ledger.RecordMemory(tokenHash, "request", model, string(requestBody))
+			}
+			if responseForMemory != "" {
+				h.ledger.RecordMemory(tokenHash, "response", model, responseForMemory)
+			}
+			if userContent != "" {
+				h.ledger.RecordMemory(tokenHash, "user", model, userContent)
+			}
+			if assistantContent != "" {
+				h.ledger.RecordMemory(tokenHash, "assistant", model, assistantContent)
+			}
+		}
+	}
+}
+
+func extractUserContentFromRequest(reqBody map[string]interface{}) string {
+	var parts []string
+
+	// OpenAI / Anthropic style message arrays.
+	if msgs, ok := reqBody["messages"].([]interface{}); ok {
+		for _, rawMsg := range msgs {
+			msg, ok := rawMsg.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			role, _ := msg["role"].(string)
+			if role != "user" {
+				continue
+			}
+			parts = append(parts, extractTextFromContent(msg["content"]))
+		}
+	}
+
+	// Gemini style request body.
+	if contents, ok := reqBody["contents"].([]interface{}); ok {
+		for _, rawContent := range contents {
+			content, ok := rawContent.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			role, _ := content["role"].(string)
+			if role != "" && role != "user" {
+				continue
+			}
+			if cparts, ok := content["parts"].([]interface{}); ok {
+				for _, rawPart := range cparts {
+					part, ok := rawPart.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					if text, _ := part["text"].(string); text != "" {
+						parts = append(parts, text)
+					}
+				}
+			}
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+func extractAssistantTextFromResponse(respBody map[string]interface{}) string {
+	// OpenAI style response.
+	if choices, ok := respBody["choices"].([]interface{}); ok && len(choices) > 0 {
+		if first, ok := choices[0].(map[string]interface{}); ok {
+			if msg, ok := first["message"].(map[string]interface{}); ok {
+				if content := extractTextFromContent(msg["content"]); content != "" {
+					return content
+				}
+			}
+			if delta, ok := first["delta"].(map[string]interface{}); ok {
+				if content := extractTextFromContent(delta["content"]); content != "" {
+					return content
+				}
+			}
+		}
+	}
+
+	// Anthropic style response.
+	if content := extractTextFromContent(respBody["content"]); content != "" {
+		return content
+	}
+
+	// Gemini style response.
+	if candidates, ok := respBody["candidates"].([]interface{}); ok && len(candidates) > 0 {
+		if first, ok := candidates[0].(map[string]interface{}); ok {
+			if candidateContent, ok := first["content"].(map[string]interface{}); ok {
+				if parts, ok := candidateContent["parts"].([]interface{}); ok {
+					var texts []string
+					for _, rawPart := range parts {
+						part, ok := rawPart.(map[string]interface{})
+						if !ok {
+							continue
+						}
+						if text, _ := part["text"].(string); text != "" {
+							texts = append(texts, text)
+						}
+					}
+					return strings.Join(texts, "\n")
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func extractTextFromContent(content interface{}) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []interface{}:
+		var parts []string
+		for _, raw := range v {
+			item, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, _ := item["text"].(string); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
 }

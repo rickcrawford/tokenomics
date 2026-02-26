@@ -126,7 +126,7 @@ func Open(dir string, memory bool) (*Ledger, error) {
 		if err := os.MkdirAll(memDir, 0o755); err != nil {
 			return nil, fmt.Errorf("create memory dir: %w", err)
 		}
-		w, err := session.NewDirMemoryWriter(memDir, "{date}_{token_hash}.md")
+		w, err := session.NewDirMemoryWriter(memDir, "{date}_{session_id}.md")
 		if err != nil {
 			return nil, fmt.Errorf("create memory writer: %w", err)
 		}
@@ -157,7 +157,7 @@ func (l *Ledger) RecordMemory(tokenHash, role, model, content string) error {
 		log.Printf("[memory] memWriter is nil for tokenHash=%s, role=%s", tokenHash[:min(16, len(tokenHash))], role)
 		return nil
 	}
-	err := l.memWriter.Append(tokenHash, role, model, content)
+	err := l.memWriter.Append(l.sessionID, role, model, content)
 	if err != nil {
 		log.Printf("[memory] error appending - %v", err)
 	} else {

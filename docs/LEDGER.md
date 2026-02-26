@@ -243,16 +243,16 @@ tokenomics ledger show a1b2 --json
 
 ## Memory Files
 
-When `ledger.memory: true`, conversation content is written to `memory/<date>_<token_hash>.md` using the same markdown format as the existing memory writer:
+When `ledger.memory: true`, conversation content is written to `memory/<date>_<session_id>.md`, so each proxy run has one memory file:
 
 ```markdown
-## 2026-02-25T10:30:05Z | user | claude-sonnet-4-20250514
+## 2026-02-25T10:30:05Z | a1b2c3d4 | user | claude-sonnet-4-20250514
 
 Write a function that validates email addresses.
 
 ---
 
-## 2026-02-25T10:30:08Z | assistant | claude-sonnet-4-20250514
+## 2026-02-25T10:30:08Z | a1b2c3d4 | assistant | claude-sonnet-4-20250514
 
 Here's a function that validates email addresses...
 

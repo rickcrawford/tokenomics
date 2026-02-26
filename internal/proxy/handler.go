@@ -53,6 +53,8 @@ type Handler struct {
 	defaultProvider string // Default provider when policy doesn't specify one
 	logging         config.LoggingConfig
 	ledger          *ledger.Ledger
+	client          *http.Client
+	debugLogDir     string // Directory for debug logs (from config)
 
 	memWriterMu    sync.Mutex
 	memWriters     map[string]session.MemoryWriter
@@ -76,6 +78,13 @@ func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstream
 		upstreamURL: upstreamURL,
 		providers:   providers,
 		memWriters:  make(map[string]session.MemoryWriter),
+		client: &http.Client{
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
 	}
 }
 
@@ -92,6 +101,11 @@ func (h *Handler) SetDefaultProvider(provider string) {
 // SetLedger configures the session ledger for token usage tracking.
 func (h *Handler) SetLedger(l *ledger.Ledger) {
 	h.ledger = l
+}
+
+// SetDebugLogDir sets the directory for debug logs from the configured path.
+func (h *Handler) SetDebugLogDir(dir string) {
+	h.debugLogDir = dir
 }
 
 // logHash returns a display-safe hash prefix, respecting the hide_token_hash config.
