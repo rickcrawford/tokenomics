@@ -115,9 +115,9 @@ tokenomics run --proxy-url https://other-proxy.com:8443 claude "test"
 | `--proxy-url` | `$TOKENOMICS_PROXY_URL` | Remote proxy URL (if set, uses remote proxy instead of starting local) |
 | `--provider` | (auto-detected) | Override provider: `generic`, `anthropic`, `azure`, `gemini` |
 | `--host` | `localhost` | Proxy hostname (only used if starting local proxy) |
-| `--port` | `8443` | Proxy port (only used if starting local proxy) |
-| `--tls` | `true` | Use HTTPS scheme (only used if starting local proxy) |
-| `--insecure` | `false` | Skip TLS verification (not recommended; install CA cert instead) |
+| `--port` | `8080` | Proxy port (only used if starting local proxy) |
+| `--tls` | `false` | Use HTTPS scheme (default false for run, traffic is localhost only) |
+| `--insecure` | `false` | Skip TLS verification (only applies when --tls is enabled) |
 
 ## Manual Mode: `tokenomics init`
 
@@ -162,11 +162,11 @@ node app.js
 |------|---------|-------------|
 | `--token` | `$TOKENOMICS_KEY` | The wrapper token |
 | `--proxy-url` | `$TOKENOMICS_PROXY_URL` | Remote proxy URL (if set, uses remote proxy instead of starting daemon) |
-| `--provider` | `generic` | Target provider: `generic`, `anthropic`, `azure`, `gemini` |
+| `--provider` | `generic` | Target provider: any name from providers.yaml, or `all` for every provider |
 | `--host` | `localhost` | Proxy hostname (only used if starting local proxy) |
 | `--port` | `8443` | Proxy port (only used if starting local proxy) |
 | `--tls` | `true` | Use HTTPS scheme (only used if starting local proxy) |
-| `--insecure` | `false` | Skip TLS verification (not recommended; install CA cert instead) |
+| `--insecure` | `false` | Skip TLS verification (only applies when --tls is enabled) |
 | `--start` | `true` | Start proxy in background (only used if proxy-url not set) |
 | `--output` | `shell` | Output format: `shell`, `dotenv`, `json` |
 | `--dotenv` | (empty) | Path to .env file (used with `--output dotenv`) |
@@ -371,10 +371,14 @@ cli_maps:
 
 ### TLS Certificate Errors
 
-Use `--insecure=true` (which is already the default):
+The `run` command defaults to `--tls=false` (plain HTTP on localhost), so TLS errors do not apply. If you enable TLS with `--tls` or use `init` (which defaults to `--tls=true`), you have two options:
+
+1. Install the CA certificate (recommended). See [TLS](TLS.md).
+2. Use `--insecure` to skip TLS verification (development only):
 
 ```bash
-tokenomics run claude "test"  # Already skips TLS verification
+tokenomics run --tls --insecure claude "test"
+tokenomics init --insecure --token tkn_abc123
 ```
 
-Or install the CA certificate and use `--insecure=false`. See [TLS](TLS.md).
+Note: `--insecure` defaults to `false`. It is not enabled by default.
