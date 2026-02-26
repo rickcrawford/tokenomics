@@ -64,6 +64,7 @@ events:
       signing_key: ""        # HMAC-SHA256 key (X-Webhook-Signature header)
       events: []             # Filter by event type (empty = all). Supports trailing wildcard (token.*)
       timeout: 10            # HTTP timeout in seconds
+      insecure: false        # Skip TLS certificate verification (for self-signed certs)
 
 remote:
   url: ""                    # Central config server URL (e.g. http://config-server:9090)
@@ -75,6 +76,9 @@ remote:
     path: "/v1/webhook"      # URL path for the receiver endpoint
     secret: ""               # Expected X-Webhook-Secret header value
     signing_key: ""          # HMAC-SHA256 key for X-Webhook-Signature verification
+    auto_register: false     # Auto-register webhook with central server on startup
+    callback_url: ""         # URL the server will POST webhook events to (required if auto_register)
+    insecure: false          # Tell server to skip TLS for this client (self-signed certs)
 
 cli_maps:                    # Map CLI names to providers for `tokenomics run`
   claude: anthropic          # `tokenomics run claude ...` uses anthropic provider
@@ -121,6 +125,7 @@ ledger:
 | `events.webhooks[].signing_key` | (empty) | HMAC-SHA256 signing key for `X-Webhook-Signature`. |
 | `events.webhooks[].events` | `[]` (all) | Event type filter. Supports trailing wildcard (`token.*`). |
 | `events.webhooks[].timeout` | `10` | HTTP timeout in seconds for webhook delivery. |
+| `events.webhooks[].insecure` | `false` | Skip TLS certificate verification for self-signed certs. |
 | `remote.url` | (empty) | URL of a remote config server to sync tokens from. |
 | `remote.api_key` | (empty) | API key for authenticating with the remote server. |
 | `remote.sync` | `0` | Sync interval in seconds. `0` means sync at startup only. |
@@ -129,6 +134,9 @@ ledger:
 | `remote.webhook.path` | `/v1/webhook` | URL path for the inbound webhook endpoint. |
 | `remote.webhook.secret` | (empty) | Expected value of the `X-Webhook-Secret` header on inbound webhooks. |
 | `remote.webhook.signing_key` | (empty) | HMAC-SHA256 key for verifying `X-Webhook-Signature` on inbound webhooks. |
+| `remote.webhook.auto_register` | `false` | Auto-register this proxy's webhook with the central server on startup. |
+| `remote.webhook.callback_url` | (empty) | URL the central server will POST webhook events to. Required if `auto_register` is true. |
+| `remote.webhook.insecure` | `false` | Tell the server to skip TLS verification when delivering to this client. |
 | `cli_maps` | (see below) | Maps CLI names to providers for auto-detection in `tokenomics run`. Example: `claude: anthropic` means `tokenomics run claude` uses the anthropic provider. |
 | `ledger.enabled` | `false` | Enable per-session token tracking to the `.tokenomics/` directory. |
 | `ledger.dir` | `.tokenomics` | Directory for session files and memory logs. |
@@ -209,6 +217,7 @@ These flags are available on all subcommands:
 |------|-------------|
 | `--config <path>` | Path to a config file. Overrides the default search paths. |
 | `--db <path>` | Path to the BoltDB database. Overrides `storage.db_path` from config. |
+| `--dir <path>` | Working directory for `.tokenomics` data. Overrides `dir` from config. Supports absolute paths. |
 
 ### `token` Subcommands
 

@@ -6,6 +6,7 @@ import (
 
 var cfgFile string
 var dbPath string
+var dirOverride string
 
 var rootCmd = &cobra.Command{
 	Use:   "tokenomics",
@@ -22,4 +23,5 @@ func Execute() error {
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: .tokenomics/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "", "database path (overrides config)")
+	rootCmd.PersistentFlags().StringVar(&dirOverride, "dir", "", "working directory for .tokenomics data (overrides config dir)")
 }
