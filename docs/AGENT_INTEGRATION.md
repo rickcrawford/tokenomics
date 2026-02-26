@@ -1,16 +1,19 @@
 # Agent Integration
 
-There are two ways to run agents through the Tokenomics proxy:
+There are three commands for connecting agents to the proxy:
 
-1. **`tokenomics run`** (recommended for single commands) — Starts proxy, runs your command, stops proxy (all in one go)
-2. **`tokenomics init`** (recommended for multiple commands) — Starts proxy in background, run commands manually, then stop proxy when done
+| Command | Purpose |
+|---------|---------|
+| `tokenomics run` | Starts proxy, runs a single command, stops proxy |
+| `tokenomics start` | Starts proxy as a background daemon |
+| `tokenomics init` | Outputs environment variables for a provider (does not start the proxy) |
 
-| Scenario | Use | Proxy Lifecycle |
-|----------|-----|-----------------|
-| Single command | `tokenomics run claude "test"` | Start → Run → Stop |
-| Multiple commands | `tokenomics init` then run commands | Start once → Run many → Stop once |
-| Quick test | `tokenomics run --insecure cmd` | Start → Run → Stop (no cert needed) |
-| Long session | `tokenomics init` with many commands | Proxy stays running for all commands |
+| Scenario | Commands |
+|----------|----------|
+| Single command | `tokenomics run claude "test"` |
+| Multiple commands | `tokenomics start` then `eval $(tokenomics init)` then run commands |
+| Remote proxy | `tokenomics init --proxy-url https://proxy.company.com` |
+| Agent config | `tokenomics init --agent claude-code` |
 
 ## Quick Start: `tokenomics run` (Recommended)
 
@@ -95,7 +98,7 @@ Set either:
 - **Environment variable:** `TOKENOMICS_PROXY_URL=https://proxy.example.com:8443`
 - **Command-line flag:** `--proxy-url https://proxy.example.com:8443`
 
-When a proxy URL is provided, the `--host`, `--port`, `--tls`, and `--start` flags are ignored (they only apply to local proxy startup).
+When a proxy URL is provided, the `--host`, `--port`, and `--tls` flags are ignored (they only apply to local proxy startup).
 
 ```bash
 # Using environment variable
@@ -119,15 +122,19 @@ tokenomics run --proxy-url https://other-proxy.com:8443 claude "test"
 | `--tls` | `false` | Use HTTPS scheme (default false for run, traffic is localhost only) |
 | `--insecure` | `false` | Skip TLS verification (only applies when --tls is enabled) |
 
-## Manual Mode: `tokenomics init`
+## Manual Mode: `tokenomics start` + `tokenomics init`
 
-The `run` command starts the proxy for a single command and stops it when done. If you want to run **multiple commands** through the same proxy session without restarting it each time, use `init` to start the proxy in the background once.
+The `run` command starts the proxy for a single command and stops it when done. For multiple commands, start the proxy separately with `start`, then use `init` to get the environment variables.
+
+`init` does not start the proxy. It only outputs environment variables.
 
 ### Usage
 
 ```bash
 export TOKENOMICS_KEY="tkn_my-wrapper-token"
-tokenomics init                    # Start proxy in background (stays running)
+
+tokenomics start                   # Start proxy daemon in background
+eval $(tokenomics init)            # Set env vars for the default provider
 
 # Run multiple commands (they all use the running proxy)
 claude "prompt 1"
@@ -137,23 +144,15 @@ node app.js
 tokenomics stop                    # Stop proxy when done
 ```
 
-This is more efficient than `tokenomics run` for multiple commands since you only start/stop the proxy once.
+### Using a Remote Proxy
 
-### Using Remote Proxy with `init`
-
-You can also use a remote proxy with `init`. It will skip the daemon startup and just configure environment variables:
+When pointing at a remote proxy, you only need `init` (no `start` needed):
 
 ```bash
-# Use shared remote proxy for multiple commands
 export TOKENOMICS_KEY="tkn_my-wrapper-token"
-export TOKENOMICS_PROXY_URL="https://proxy.company.com:8443"
-tokenomics init --provider anthropic --output shell
-
-# Now run multiple commands through the remote proxy
-eval "$(tokenomics init --provider anthropic --output shell)"
+eval "$(tokenomics init --proxy-url https://proxy.company.com:8443 --provider anthropic)"
 claude "prompt 1"
 python script.py
-node app.js
 ```
 
 ### `tokenomics init` Flags
@@ -161,15 +160,15 @@ node app.js
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--token` | `$TOKENOMICS_KEY` | The wrapper token |
-| `--proxy-url` | `$TOKENOMICS_PROXY_URL` | Remote proxy URL (if set, uses remote proxy instead of starting daemon) |
+| `--proxy-url` | `$TOKENOMICS_PROXY_URL` | Proxy URL (if set, used directly in env var output) |
 | `--provider` | `generic` | Target provider: any name from providers.yaml, or `all` for every provider |
-| `--host` | `localhost` | Proxy hostname (only used if starting local proxy) |
-| `--port` | `8443` | Proxy port (only used if starting local proxy) |
-| `--tls` | `true` | Use HTTPS scheme (only used if starting local proxy) |
-| `--insecure` | `false` | Skip TLS verification (only applies when --tls is enabled) |
-| `--start` | `true` | Start proxy in background (only used if proxy-url not set) |
+| `--host` | `localhost` | Proxy hostname for constructing the base URL |
+| `--port` | `8443` | Proxy port for constructing the base URL |
+| `--tls` | `true` | Use HTTPS scheme in the base URL |
+| `--insecure` | `false` | Add `NODE_TLS_REJECT_UNAUTHORIZED=0` to env output |
 | `--output` | `shell` | Output format: `shell`, `dotenv`, `json` |
 | `--dotenv` | (empty) | Path to .env file (used with `--output dotenv`) |
+| `--agent` | (empty) | Write config for an agent framework (`claude-code`) |
 
 ### Output Formats
 
@@ -371,14 +370,12 @@ cli_maps:
 
 ### TLS Certificate Errors
 
-The `run` command defaults to `--tls=false` (plain HTTP on localhost), so TLS errors do not apply. If you enable TLS with `--tls` or use `init` (which defaults to `--tls=true`), you have two options:
+The `run` command defaults to `--tls=false` (plain HTTP on localhost), so TLS errors do not apply. The `start` command defaults to `--tls=true`. If TLS is enabled, you have two options:
 
 1. Install the CA certificate (recommended). See [TLS](TLS.md).
 2. Use `--insecure` to skip TLS verification (development only):
 
 ```bash
 tokenomics run --tls --insecure claude "test"
-tokenomics init --insecure --token tkn_abc123
+tokenomics init --insecure --token tkn_abc123  # adds NODE_TLS_REJECT_UNAUTHORIZED=0
 ```
-
-Note: `--insecure` defaults to `false`. It is not enabled by default.

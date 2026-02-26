@@ -93,17 +93,18 @@ tokenomics run claude "What is the capital of France?"
 
 The `run` command auto-detects the provider, starts the proxy, runs your command, and cleans up.
 
-For multiple commands, keep the proxy running:
+For multiple commands, start the proxy separately:
 
 ```bash
 export TOKENOMICS_KEY="tkn_my-wrapper-token"
-tokenomics init    # Start proxy in background
+tokenomics start              # Start proxy daemon
+eval $(tokenomics init)       # Set env vars for default provider
 
 claude "prompt 1"
 python script.py
 node app.js
 
-tokenomics stop    # Stop when done
+tokenomics stop               # Stop when done
 ```
 
 For development without certificates:
