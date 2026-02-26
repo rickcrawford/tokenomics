@@ -132,4 +132,9 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 
 	proxy.ServeHTTP(lw, r)
 	logEntry.StatusCode = lw.statusCode
+
+	// Record to ledger (without token counts for passthrough)
+	if h.ledger != nil {
+		h.recordLedgerEntry(logEntry, tokenHash, "", providerName, 0, 0, lw.statusCode, false, 0, nil)
+	}
 }
