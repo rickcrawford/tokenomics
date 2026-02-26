@@ -15,7 +15,7 @@ var initCmd = &cobra.Command{
 	Short: "Configure an agent CLI to use the tokenomics proxy",
 	Long: `Sets environment variables or writes config for an agent framework
 (OpenAI, Anthropic, Azure, Gemini, or custom) to route API calls through the proxy.
-Can optionally start the proxy in the background.
+Does not start the proxy. Use 'tokenomics start' or 'tokenomics run' to start it.
 
 The --provider flag accepts any provider name from providers.yaml (e.g. deepseek,
 groq, mistral) in addition to the built-in aliases (generic, anthropic, azure, gemini).
@@ -48,27 +48,21 @@ var (
 	initEnvBase   string
 	initOutputFmt string
 	initDotenv    string
-	initPidFile   string
-	initLogFile   string
-	initStart     bool
 	initAgent     string
 )
 
 func init() {
 	initCmd.Flags().StringVar(&initToken, "token", "", "wrapper token (read from $TOKENOMICS_KEY if not provided)")
-	initCmd.Flags().StringVar(&initProxyURL, "proxy-url", "", "remote proxy URL (read from $TOKENOMICS_PROXY_URL if not provided; if set, uses remote proxy instead of starting local)")
-	initCmd.Flags().StringVar(&initHost, "host", "localhost", "proxy hostname (only used if starting local proxy)")
-	initCmd.Flags().IntVar(&initPort, "port", 8443, "proxy port (only used if starting local proxy)")
-	initCmd.Flags().BoolVar(&initTLS, "tls", true, "use HTTPS (only used if starting local proxy)")
-	initCmd.Flags().BoolVar(&initInsecure, "insecure", false, "skip TLS verification (not recommended; install valid certificates instead)")
+	initCmd.Flags().StringVar(&initProxyURL, "proxy-url", "", "proxy URL (read from $TOKENOMICS_PROXY_URL if not provided)")
+	initCmd.Flags().StringVar(&initHost, "host", "localhost", "proxy hostname for constructing the base URL")
+	initCmd.Flags().IntVar(&initPort, "port", 8443, "proxy port for constructing the base URL")
+	initCmd.Flags().BoolVar(&initTLS, "tls", true, "use HTTPS scheme in the base URL")
+	initCmd.Flags().BoolVar(&initInsecure, "insecure", false, "add NODE_TLS_REJECT_UNAUTHORIZED=0 to env output")
 	initCmd.Flags().StringVar(&initProvider, "provider", "generic", "target provider, provider name from config, or 'all' for every configured provider")
 	initCmd.Flags().StringVar(&initEnvKey, "env-key", "", "custom env var name for the API key")
 	initCmd.Flags().StringVar(&initEnvBase, "env-base-url", "", "custom env var name for the base URL")
 	initCmd.Flags().StringVar(&initOutputFmt, "output", "shell", "output format (shell, dotenv, json)")
 	initCmd.Flags().StringVar(&initDotenv, "dotenv", "", "path to .env file (used with --output dotenv)")
-	initCmd.Flags().BoolVar(&initStart, "start", true, "start the proxy in the background (default: true)")
-	initCmd.Flags().StringVar(&initPidFile, "pid-file", "", "PID file path (default: ~/.tokenomics/tokenomics.pid)")
-	initCmd.Flags().StringVar(&initLogFile, "log-file", "", "log file path (default: ~/.tokenomics/tokenomics.log)")
 	initCmd.Flags().StringVar(&initAgent, "agent", "", "write hook config for an agent (claude-code)")
 
 	rootCmd.AddCommand(initCmd)
@@ -91,30 +85,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Determine base URL
 	var baseURL string
 	if initProxyURL != "" {
-		// Use remote proxy
 		baseURL = initProxyURL
 	} else {
-		// Use local proxy
 		scheme := "https"
 		if !initTLS {
 			scheme = "http"
 		}
 		baseURL = fmt.Sprintf("%s://%s:%d", scheme, initHost, initPort)
-
-		// Start the proxy daemon (enabled by default for convenience)
-		if initStart {
-			dcfg := daemonConfig{
-				host:     initHost,
-				port:     initPort,
-				tls:      initTLS,
-				insecure: initInsecure,
-				pidFile:  initPidFile,
-				logFile:  initLogFile,
-			}
-			if err := startDaemon(baseURL, dcfg); err != nil {
-				return err
-			}
-		}
 	}
 
 	// Load config for provider-aware resolution and auto-detection

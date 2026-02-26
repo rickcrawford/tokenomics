@@ -93,17 +93,18 @@ tokenomics run claude "What is the capital of France?"
 
 The `run` command auto-detects the provider, starts the proxy, runs your command, and cleans up.
 
-For multiple commands, keep the proxy running:
+For multiple commands, start the proxy separately:
 
 ```bash
 export TOKENOMICS_KEY="tkn_my-wrapper-token"
-tokenomics init    # Start proxy in background
+tokenomics start              # Start proxy daemon
+eval $(tokenomics init)       # Set env vars for default provider
 
 claude "prompt 1"
 python script.py
 node app.js
 
-tokenomics stop    # Stop when done
+tokenomics stop               # Stop when done
 ```
 
 For development without certificates:
@@ -162,16 +163,18 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 
 | Topic | Description |
 |-------|-------------|
+| [Features](docs/FEATURES.md) | Complete feature reference organized by category |
 | [Examples](examples/) | Provider configs, sample policies, webhook collector, env template |
 | [Configuration](docs/CONFIGURATION.md) | config.yaml fields, environment variables, CLI flags |
 | [Policies](docs/POLICIES.md) | Policy JSON schema, model filtering, rules, prompts, memory |
-| [Token Management](docs/TOKEN_MANAGEMENT.md) | Creating, listing, and deleting tokens |
+| [Token Management](docs/TOKEN_MANAGEMENT.md) | Creating, inspecting, updating, and deleting tokens |
 | [Agent Integration](docs/AGENT_INTEGRATION.md) | Connecting agents via `run`, `init`, or manual proxy setup |
 | [TLS](docs/TLS.md) | Auto-generated certificates, CA trust, custom certs |
 | [Stats & Logging](docs/STATS_AND_LOGGING.md) | Request logging, /stats endpoint, usage tracking |
 | [Events & Webhooks](docs/EVENTS.md) | Webhook events for token CRUD, rule violations, budget alerts |
 | [Multi-Model Routing](docs/MULTI_MODEL_ROUTING.md) | Provider routing, model matching, auth schemes, fallback chains |
 | [Session Ledger](docs/LEDGER.md) | Per-session token tracking, CLI commands, session JSON format |
+| [Distribution](docs/DISTRIBUTION.md) | Installation methods, pre-built binaries, release process |
 
 ## Author
 
