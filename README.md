@@ -170,6 +170,7 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 | [TLS](docs/TLS.md) | Auto-generated certificates, CA trust, custom certs |
 | [Stats & Logging](docs/STATS_AND_LOGGING.md) | Request logging, /stats endpoint, usage tracking |
 | [Events & Webhooks](docs/EVENTS.md) | Webhook events for token CRUD, rule violations, budget alerts |
+| [Multi-Model Routing](docs/MULTI_MODEL_ROUTING.md) | Provider routing, model matching, auth schemes, fallback chains |
 | [Session Ledger](docs/LEDGER.md) | Per-session token tracking, CLI commands, session JSON format |
 
 ## Author
