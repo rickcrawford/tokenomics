@@ -155,6 +155,30 @@ claude "prompt 1"
 python script.py
 ```
 
+### `tokenomics start` Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--host` | `localhost` | Proxy hostname |
+| `--port` | `8443` | Proxy port |
+| `--tls` | `true` | Use HTTPS |
+| `--pid-file` | `~/.tokenomics/tokenomics.pid` | PID file path |
+| `--log-file` | `~/.tokenomics/tokenomics.log` | Log file path |
+
+The `start` command prints the proxy URL to stdout, which can be captured:
+
+```bash
+export TOKENOMICS_PROXY_URL=$(tokenomics start)
+```
+
+### `tokenomics stop` Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--pid-file` | `~/.tokenomics/tokenomics.pid` | PID file path |
+
+Sends SIGTERM for graceful shutdown. Falls back to SIGKILL after 3 seconds if the process does not exit.
+
 ### `tokenomics init` Flags
 
 | Flag | Default | Description |

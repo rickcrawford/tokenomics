@@ -75,6 +75,75 @@ WARNING: This token will only be shown once. Store it securely.
 
 Save the `Token` value immediately. It cannot be recovered later. The `Hash` value is what gets stored in the database and appears in `token list` output.
 
+### Token Expiration
+
+Add `--expires` to set an expiration on the token:
+
+```bash
+# Duration-based (relative to now)
+./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}' --expires 24h
+./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}' --expires 7d
+./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}' --expires 1y
+
+# Exact timestamp
+./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}' --expires 2025-12-31T00:00:00Z
+```
+
+Supported formats: Go durations (`24h`, `168h`), day shorthand (`7d`, `30d`), year shorthand (`1y`), or RFC3339 timestamps. When a token expires, requests using it are rejected and a `token.expired` event is emitted.
+
+### Policy from File
+
+Use `@` prefix to read policy JSON from a file:
+
+```bash
+./bin/tokenomics token create --policy @policy.json
+```
+
+## Inspecting Tokens
+
+```bash
+./bin/tokenomics token get --hash <hash>
+```
+
+Retrieves a token's full details including its policy JSON:
+
+```
+Hash:       9f86d0818...
+Created:    2025-01-15 10:30:00 +0000 UTC
+Expires:    2025-02-15T10:30:00Z (active)
+Policy:
+{
+  "base_key_env": "OPENAI_API_KEY",
+  "max_tokens": 100000
+}
+```
+
+The expiration status shows `active` or `EXPIRED`. If the token has no expiration, it shows `never`.
+
+## Updating Tokens
+
+```bash
+./bin/tokenomics token update --hash <hash> [--policy '<json>'] [--expires <value>]
+```
+
+Update a token's policy, expiration, or both. At least one of `--policy` or `--expires` is required.
+
+```bash
+# Update the policy
+./bin/tokenomics token update --hash 9f86d0818... --policy '{"base_key_env":"OPENAI_API_KEY","max_tokens":200000}'
+
+# Extend the expiration
+./bin/tokenomics token update --hash 9f86d0818... --expires 30d
+
+# Remove expiration (make permanent)
+./bin/tokenomics token update --hash 9f86d0818... --expires clear
+
+# Update both at once
+./bin/tokenomics token update --hash 9f86d0818... --policy '{"max_tokens":500000}' --expires 7d
+```
+
+A `token.updated` event is emitted on successful update.
+
 ## Listing Tokens
 
 ```bash
@@ -86,6 +155,7 @@ Displays all stored token hashes along with their policy details:
 ```
 Hash:       9f86d0818...
 Created:    2025-01-15 10:30:00 +0000 UTC
+Expires:    2025-02-15T10:30:00Z (active)
 Key Env:    OPENAI_API_KEY
 Model Regex: ^gpt-4.*
 Max Tokens: 100000
@@ -100,6 +170,7 @@ Fields shown per token:
 |-------|-------------|
 | Hash | The HMAC-SHA256 hash (the database key) |
 | Created | Timestamp when the token was created |
+| Expires | Expiration timestamp with status (`active` or `EXPIRED`). Only shown if set. |
 | Key Env | The `base_key_env` from the policy |
 | Upstream | The `upstream_url` (only shown if set) |
 | Model | The exact `model` restriction (only shown if set) |

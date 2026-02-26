@@ -207,10 +207,71 @@ These flags are available on all subcommands:
 
 | Command | Flag | Description |
 |---|---|---|
-| `token create` | `--policy <json>` | Policy JSON string (required) |
+| `token create` | `--policy <json>` | Policy JSON string or `@file.json` (required) |
+| `token create` | `--expires <value>` | Expiration: duration (`24h`, `7d`, `1y`), RFC3339, or omit for no expiry |
+| `token get` | `--hash <hash>` | Token hash to retrieve (required) |
+| `token update` | `--hash <hash>` | Token hash to update (required) |
+| `token update` | `--policy <json>` | New policy JSON (optional, at least one of --policy or --expires required) |
+| `token update` | `--expires <value>` | New expiration, or `clear` to remove (optional) |
 | `token delete` | `--hash <hash>` | Token hash to delete (required) |
 | `token list` | (none) | Lists all tokens and their policies |
 
-### `init` Command
+### `start` / `stop` Commands
 
-See [Agent Integration](AGENT_INTEGRATION.md) for full details on `init` flags.
+| Command | Flag | Default | Description |
+|---|---|---|---|
+| `start` | `--host` | `localhost` | Proxy hostname |
+| `start` | `--port` | `8443` | Proxy port |
+| `start` | `--tls` | `true` | Use HTTPS |
+| `start` | `--pid-file` | `~/.tokenomics/tokenomics.pid` | PID file path |
+| `start` | `--log-file` | `~/.tokenomics/tokenomics.log` | Log file path |
+| `stop` | `--pid-file` | `~/.tokenomics/tokenomics.pid` | PID file path |
+
+### `provider` Subcommands
+
+| Command | Flag | Default | Description |
+|---|---|---|---|
+| `provider list` | `--output` | `table` | Output format: `table` or `json` |
+| `provider test` | `--insecure` | `false` | Skip TLS verification for connectivity tests |
+| `provider test` | `[provider...]` | (all) | Test specific providers or all if none given |
+| `provider models` | `[provider]` | (all) | Show models for a specific provider or all |
+
+### `ledger` Subcommands
+
+| Command | Flag | Default | Description |
+|---|---|---|---|
+| `ledger summary` | `--dir` | from config or `.tokenomics` | Ledger directory |
+| `ledger summary` | `--json` | `false` | Output as JSON |
+| `ledger sessions` | `--dir` | from config or `.tokenomics` | Ledger directory |
+| `ledger sessions` | `--json` | `false` | Output as JSON |
+| `ledger show` | `--dir` | from config or `.tokenomics` | Ledger directory |
+| `ledger show` | `--json` | `false` | Output as JSON |
+
+### `doctor` / `status` / `version` Commands
+
+These commands take no additional flags beyond the global `--config` and `--db` flags.
+
+| Command | Description |
+|---|---|
+| `doctor` | Check config, database, security keys, provider keys, TLS, proxy state, remote config |
+| `status` | Show proxy state, environment variables, provider key status, token count |
+| `version` | Print version, commit, build date, Go version, OS/arch |
+
+### `remote` Command
+
+| Flag | Default | Description |
+|---|---|---|
+| `--addr` | `:9090` | Listen address (host:port) |
+| `--api-key` | (empty) | API key for authenticating client requests |
+
+### `init` / `run` Commands
+
+See [Agent Integration](AGENT_INTEGRATION.md) for full details on `init` and `run` flags.
+
+### `completion` Command
+
+```bash
+tokenomics completion [bash|zsh|fish|powershell]
+```
+
+Generates shell completion scripts. See `tokenomics completion --help` for per-shell installation instructions.
