@@ -88,6 +88,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// Apply --dir override if set
+	if dirOverride != "" {
+		cfg.Dir = dirOverride
+		if !filepath.IsAbs(cfg.Dir) {
+			if abs, err := filepath.Abs(cfg.Dir); err == nil {
+				cfg.Dir = abs
+			}
+		}
+		cfg.Storage.DBPath = filepath.Join(cfg.Dir, "tokenomics.db")
+		if cfg.Ledger.Dir == "" || cfg.Ledger.Dir == cfg.Dir {
+			cfg.Ledger.Dir = cfg.Dir
+		}
+		if err := config.EnsureDir(cfg.Dir); err != nil {
+			return fmt.Errorf("ensure directory: %w", err)
+		}
+	}
+
 	dbFile := cfg.Storage.DBPath
 	if dbPath != "" {
 		dbFile = dbPath
@@ -109,6 +126,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Remote sync (if configured)
 	var remoteClient *remote.Client
+	var registeredClientID string
 	if cfg.Remote.URL != "" {
 		remoteClient = buildRemoteClient(cfg.Remote)
 		n, err := remoteClient.SyncTo(tokenStore)
@@ -121,6 +139,34 @@ func runServe(cmd *cobra.Command, args []string) error {
 			remoteClient.StartPeriodicSync(tokenStore, time.Duration(cfg.Remote.SyncSec)*time.Second)
 			defer remoteClient.Stop()
 		}
+
+		// Auto-register webhook with central server if configured
+		if cfg.Remote.Webhook.AutoRegister && cfg.Remote.Webhook.CallbackURL != "" {
+			reg := remote.ClientRegistration{
+				URL:       cfg.Remote.Webhook.CallbackURL,
+				Secret:    cfg.Remote.Webhook.Secret,
+				SigningKey: cfg.Remote.Webhook.SigningKey,
+				Events:    []string{"token.*"},
+				Insecure:  cfg.Remote.Webhook.Insecure,
+			}
+			id, err := remoteClient.RegisterWebhook(reg)
+			if err != nil {
+				log.Printf("Webhook auto-registration failed: %v (push sync will not work)", err)
+			} else {
+				registeredClientID = id
+				log.Printf("Webhook auto-registered with central server (client_id=%s, callback=%s)", id, cfg.Remote.Webhook.CallbackURL)
+			}
+		}
+	}
+	// Deferred cleanup: unregister webhook on shutdown if we registered
+	if registeredClientID != "" {
+		defer func() {
+			if err := remoteClient.UnregisterWebhook(registeredClientID); err != nil {
+				log.Printf("Webhook unregister failed: %v", err)
+			} else {
+				log.Printf("Webhook unregistered from central server (client_id=%s)", registeredClientID)
+			}
+		}()
 	}
 
 	// Init session store
@@ -330,8 +376,9 @@ func buildEmitter(cfg config.EventsConfig) events.Emitter {
 			SigningKey: wh.SigningKey,
 			Events:     wh.Events,
 			TimeoutSec: wh.TimeoutSec,
+			Insecure:   wh.Insecure,
 		}))
-		log.Printf("Webhook registered: %s (events: %v)", wh.URL, wh.Events)
+		log.Printf("Webhook registered: %s (events: %v, insecure: %v)", wh.URL, wh.Events, wh.Insecure)
 	}
 
 	if len(emitters) == 1 {

@@ -36,6 +36,7 @@ Multiple webhooks can be configured. Each receives events independently with its
 | `signing_key` | HMAC-SHA256 key; signature sent as `X-Webhook-Signature` | — |
 | `events` | Event type filter (supports trailing `*` wildcard); empty = all | all |
 | `timeout` | HTTP timeout in seconds | 10 |
+| `insecure` | Skip TLS certificate verification (for self-signed certs) | false |
 
 ## Event Types
 
@@ -287,9 +288,24 @@ remote:
     path: /v1/webhook            # Default path
     secret: my-webhook-secret    # Must match outbound webhook secret
     signing_key: my-signing-key  # Must match outbound webhook signing key
+    auto_register: true          # Auto-register with central server on startup
+    callback_url: https://this-proxy:8443/v1/webhook  # URL the server will POST to
+    insecure: true               # Tell server to skip TLS for this client (self-signed certs)
 ```
 
-On the central config server, add outbound webhooks pointing to each proxy:
+#### Auto-Registration
+
+When `auto_register: true` and `callback_url` is set, the proxy automatically registers its webhook endpoint with the central config server on startup (POST to `/api/v1/clients`). On shutdown, it unregisters itself. This eliminates manual webhook configuration on the server side.
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `auto_register` | Register this proxy's webhook with the central server on startup | `false` |
+| `callback_url` | The URL the central server will POST webhook events to (required if `auto_register` is true) | — |
+| `insecure` | Tell the server to skip TLS verification when delivering to this client | `false` |
+
+#### Static Configuration (Alternative)
+
+If you prefer static configuration over auto-registration, add outbound webhooks on the central config server pointing to each proxy:
 
 ```yaml
 events:
@@ -298,6 +314,7 @@ events:
       secret: my-webhook-secret
       signing_key: my-signing-key
       events: ["token.*"]
+      insecure: true             # Skip TLS for self-signed certs
 
     - url: https://proxy-2.internal:8443/v1/webhook
       secret: my-webhook-secret
@@ -305,14 +322,55 @@ events:
       events: ["token.*"]
 ```
 
+### Client Registration API
+
+The central config server (`tokenomics remote`) exposes REST endpoints for managing webhook client registrations. Registered clients receive push notifications for token lifecycle events.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/clients` | Register a new webhook client |
+| `GET` | `/api/v1/clients` | List all registered clients |
+| `GET` | `/api/v1/clients/{id}` | Get a single client registration |
+| `DELETE` | `/api/v1/clients/{id}` | Unregister a client |
+
+**Register request body:**
+
+```json
+{
+  "url": "https://proxy-1.internal:8443/v1/webhook",
+  "secret": "my-webhook-secret",
+  "signing_key": "my-signing-key",
+  "events": ["token.*"],
+  "insecure": true
+}
+```
+
+**Register response (201 Created):**
+
+```json
+{
+  "id": "cl_a1b2c3d4e5f6a7b8",
+  "url": "https://proxy-1.internal:8443/v1/webhook",
+  "secret": "my-webhook-secret",
+  "signing_key": "my-signing-key",
+  "events": ["token.*"],
+  "insecure": true,
+  "created_at": "2026-01-15T10:30:00Z"
+}
+```
+
+Registrations are persisted in a BoltDB file (`clients.db`) and survive server restarts.
+
 ### How It Works
 
-1. Admin creates/updates/deletes a token on the central config server
-2. The central server emits a `token.*` event via its outbound webhooks
-3. Each proxy's webhook receiver validates the request (secret and/or HMAC signature)
-4. On valid `token.*` events, the proxy immediately syncs from the central server
-5. Non-token events (e.g., `request.completed`) are ignored
-6. Rapid successive events are debounced (1 second window)
+1. Proxy starts and (optionally) auto-registers its webhook with the central server
+2. Admin creates/updates/deletes a token on the central config server
+3. The central server emits a `token.*` event to all registered clients and static webhooks
+4. Each proxy's webhook receiver validates the request (secret and/or HMAC signature)
+5. On valid `token.*` events, the proxy immediately syncs from the central server
+6. Non-token events (e.g., `request.completed`) are ignored
+7. Rapid successive events are debounced (1 second window)
+8. On proxy shutdown, the auto-registration is cleaned up
 
 ### Receiver Responses
 
@@ -356,9 +414,10 @@ type Emitter interface {
 ```
 
 Current implementations:
-- **`WebhookEmitter`** — HTTP POST to a URL (outbound)
-- **`WebhookReceiver`** — HTTP endpoint that accepts events and triggers sync (inbound)
-- **`Multi`** — Fan-out to multiple emitters
-- **`Nop`** — No-op (used when no webhooks are configured)
+- **`WebhookEmitter`** -- HTTP POST to a URL (outbound)
+- **`WebhookReceiver`** -- HTTP endpoint that accepts events and triggers sync (inbound)
+- **`ClientRegistry`** -- BoltDB-backed dynamic webhook client store, implements `Emitter` to fan out to all registered clients
+- **`Multi`** -- Fan-out to multiple emitters
+- **`Nop`** -- No-op (used when no webhooks are configured)
 
 Future implementations could include message buses (Kafka, NATS, RabbitMQ), cloud pub/sub (AWS SNS, GCP Pub/Sub), or log sinks.

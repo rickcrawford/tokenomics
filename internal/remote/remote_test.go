@@ -357,3 +357,119 @@ func TestHTTPError(t *testing.T) {
 		t.Fatalf("unexpected error message: %s", e.Error())
 	}
 }
+
+func TestClientRegisterWebhook(t *testing.T) {
+	ms := newMemStore()
+	cr, err := NewClientRegistry(tempRegistryDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cr.Close()
+
+	srv := NewServer(ms, "my-key", cr)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "my-key", nil)
+	id, err := client.RegisterWebhook(ClientRegistration{
+		URL:       "https://proxy.example.com/v1/webhook",
+		Secret:    "shared-secret",
+		SigningKey: "hmac-key",
+		Events:    []string{"token.*"},
+		Insecure:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id == "" {
+		t.Fatal("expected non-empty client ID")
+	}
+
+	// Verify registration was stored
+	clients, _ := cr.List()
+	if len(clients) != 1 {
+		t.Fatalf("expected 1 registered client, got %d", len(clients))
+	}
+	if clients[0].URL != "https://proxy.example.com/v1/webhook" {
+		t.Fatalf("unexpected URL: %s", clients[0].URL)
+	}
+	if !clients[0].Insecure {
+		t.Fatal("expected insecure=true")
+	}
+}
+
+func TestClientRegisterWebhookUnauthorized(t *testing.T) {
+	ms := newMemStore()
+	cr, err := NewClientRegistry(tempRegistryDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cr.Close()
+
+	srv := NewServer(ms, "correct-key", cr)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "wrong-key", nil)
+	_, err = client.RegisterWebhook(ClientRegistration{URL: "https://proxy.example.com/hook"})
+	if err == nil {
+		t.Fatal("expected error for wrong API key")
+	}
+	httpErr, ok := err.(*HTTPError)
+	if !ok {
+		t.Fatalf("expected HTTPError, got %T", err)
+	}
+	if httpErr.StatusCode != 403 {
+		t.Fatalf("expected 403, got %d", httpErr.StatusCode)
+	}
+}
+
+func TestClientUnregisterWebhook(t *testing.T) {
+	ms := newMemStore()
+	cr, err := NewClientRegistry(tempRegistryDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cr.Close()
+
+	srv := NewServer(ms, "", cr)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "", nil)
+	id, err := client.RegisterWebhook(ClientRegistration{URL: "https://proxy.example.com/hook"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Unregister
+	err = client.UnregisterWebhook(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify it's gone
+	clients, _ := cr.List()
+	if len(clients) != 0 {
+		t.Fatalf("expected 0 clients after unregister, got %d", len(clients))
+	}
+}
+
+func TestClientUnregisterWebhookNotFound(t *testing.T) {
+	ms := newMemStore()
+	cr, err := NewClientRegistry(tempRegistryDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cr.Close()
+
+	srv := NewServer(ms, "", cr)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "", nil)
+	err = client.UnregisterWebhook("cl_nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent client")
+	}
+}

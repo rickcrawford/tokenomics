@@ -116,10 +116,13 @@ type RemoteConfig struct {
 // The central config server pushes token lifecycle events here to trigger
 // immediate sync instead of waiting for the poll interval.
 type WebhookReceiver struct {
-	Enabled    bool   `mapstructure:"enabled"`     // Enable the webhook receiver endpoint
-	Path       string `mapstructure:"path"`        // URL path (default: /v1/webhook)
-	Secret     string `mapstructure:"secret"`      // Expected X-Webhook-Secret header value
-	SigningKey string `mapstructure:"signing_key"` // HMAC-SHA256 key for X-Webhook-Signature verification
+	Enabled      bool   `mapstructure:"enabled"`       // Enable the webhook receiver endpoint
+	Path         string `mapstructure:"path"`          // URL path (default: /v1/webhook)
+	Secret       string `mapstructure:"secret"`        // Expected X-Webhook-Secret header value
+	SigningKey   string `mapstructure:"signing_key"`   // HMAC-SHA256 key for X-Webhook-Signature verification
+	AutoRegister bool   `mapstructure:"auto_register"` // Auto-register this proxy's webhook with the central server on startup
+	CallbackURL  string `mapstructure:"callback_url"`  // Webhook callback URL the central server will POST to (required if auto_register is true)
+	Insecure     bool   `mapstructure:"insecure"`      // Tell the server to skip TLS verification when delivering webhooks to this client
 }
 
 // EventsConfig holds webhook and future event emitter configuration.
@@ -134,6 +137,7 @@ type WebhookEndpoint struct {
 	SigningKey string   `mapstructure:"signing_key"` // HMAC-SHA256 signing key for X-Webhook-Signature
 	Events     []string `mapstructure:"events"`      // Event type filter (supports trailing * wildcard); empty = all
 	TimeoutSec int      `mapstructure:"timeout"`     // HTTP timeout in seconds (default 10)
+	Insecure   bool     `mapstructure:"insecure"`    // Skip TLS certificate verification (for self-signed certs)
 }
 
 // ProviderConfig defines a known upstream AI provider.

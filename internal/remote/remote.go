@@ -1,7 +1,9 @@
 package remote
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -13,23 +15,31 @@ import (
 
 // Server is a lightweight HTTP server that serves tokens and config
 // to remote proxy instances. It wraps a TokenStore and exposes
-// read-only endpoints for syncing.
+// read-only endpoints for syncing. Optionally manages webhook client
+// registrations via a ClientRegistry.
 type Server struct {
-	store  store.TokenStore
-	apiKey string
-	mux    *http.ServeMux
+	store    store.TokenStore
+	registry *ClientRegistry
+	apiKey   string
+	mux      *http.ServeMux
 }
 
 // NewServer creates a remote config server backed by the given token store.
 // If apiKey is non-empty, requests must include it as a Bearer token.
-func NewServer(tokenStore store.TokenStore, apiKey string) *Server {
+// If registry is non-nil, client registration endpoints are enabled.
+func NewServer(tokenStore store.TokenStore, apiKey string, registry ...*ClientRegistry) *Server {
 	s := &Server{
 		store:  tokenStore,
 		apiKey: apiKey,
 		mux:    http.NewServeMux(),
 	}
+	if len(registry) > 0 && registry[0] != nil {
+		s.registry = registry[0]
+	}
 	s.mux.HandleFunc("/api/v1/tokens", s.handleTokens)
 	s.mux.HandleFunc("/api/v1/tokens/", s.handleTokenByHash)
+	s.mux.HandleFunc("/api/v1/clients", s.handleClients)
+	s.mux.HandleFunc("/api/v1/clients/", s.handleClientByID)
 	s.mux.HandleFunc("/health", s.handleHealth)
 	return s
 }
@@ -132,6 +142,121 @@ func (s *Server) handleTokenByHash(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status":"ok"}`))
+}
+
+// handleClients handles GET (list) and POST (register) for webhook clients.
+func (s *Server) handleClients(w http.ResponseWriter, r *http.Request) {
+	if !s.authenticate(w, r) {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		s.listClients(w, r)
+	case http.MethodPost:
+		s.registerClient(w, r)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// handleClientByID handles GET (get) and DELETE (unregister) for a specific client.
+func (s *Server) handleClientByID(w http.ResponseWriter, r *http.Request) {
+	if !s.authenticate(w, r) {
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/clients/")
+	if id == "" {
+		http.Error(w, `{"error":"missing client id"}`, http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		s.getClient(w, id)
+	case http.MethodDelete:
+		s.deleteClient(w, id)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) listClients(w http.ResponseWriter, _ *http.Request) {
+	if s.registry == nil {
+		http.Error(w, `{"error":"client registration not enabled"}`, http.StatusNotFound)
+		return
+	}
+
+	clients, err := s.registry.List()
+	if err != nil {
+		http.Error(w, `{"error":"list clients: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	if clients == nil {
+		clients = []ClientRegistration{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(clients)
+}
+
+func (s *Server) registerClient(w http.ResponseWriter, r *http.Request) {
+	if s.registry == nil {
+		http.Error(w, `{"error":"client registration not enabled"}`, http.StatusNotFound)
+		return
+	}
+
+	var req ClientRegistration
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	reg, err := s.registry.Register(req)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(reg)
+}
+
+func (s *Server) getClient(w http.ResponseWriter, id string) {
+	if s.registry == nil {
+		http.Error(w, `{"error":"client registration not enabled"}`, http.StatusNotFound)
+		return
+	}
+
+	client, err := s.registry.Get(id)
+	if err != nil {
+		http.Error(w, `{"error":"get client: `+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	if client == nil {
+		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(client)
+}
+
+func (s *Server) deleteClient(w http.ResponseWriter, id string) {
+	if s.registry == nil {
+		http.Error(w, `{"error":"client registration not enabled"}`, http.StatusNotFound)
+		return
+	}
+
+	if err := s.registry.Unregister(id); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"deleted"}`))
 }
 
 // Client fetches tokens from a remote config server and syncs them
@@ -255,6 +380,64 @@ func (c *Client) Stop() {
 		close(c.stopCh)
 		c.stopped = true
 	}
+}
+
+// RegisterWebhook registers this client's webhook endpoint with the central
+// config server so the server will push token events to this proxy.
+// Returns the registration ID on success.
+func (c *Client) RegisterWebhook(reg ClientRegistration) (string, error) {
+	body, err := json.Marshal(reg)
+	if err != nil {
+		return "", fmt.Errorf("marshal registration: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/api/v1/clients", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return "", &HTTPError{StatusCode: resp.StatusCode}
+	}
+
+	var result ClientRegistration
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+	return result.ID, nil
+}
+
+// UnregisterWebhook removes a previously registered webhook client from
+// the central config server.
+func (c *Client) UnregisterWebhook(clientID string) error {
+	req, err := http.NewRequest(http.MethodDelete, c.baseURL+"/api/v1/clients/"+clientID, nil)
+	if err != nil {
+		return err
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return &HTTPError{StatusCode: resp.StatusCode}
+	}
+	return nil
 }
 
 // HTTPError represents a non-200 response from the remote server.

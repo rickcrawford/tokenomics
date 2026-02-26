@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -21,6 +22,7 @@ type WebhookConfig struct {
 	SigningKey string   `mapstructure:"signing_key" json:"signing_key,omitempty"` // HMAC-SHA256 signing key; signature sent as X-Webhook-Signature
 	Events     []string `mapstructure:"events" json:"events,omitempty"`           // Event type filter (supports trailing * wildcard); empty = all
 	TimeoutSec int      `mapstructure:"timeout" json:"timeout,omitempty"`         // HTTP timeout in seconds (default 10)
+	Insecure   bool     `mapstructure:"insecure" json:"insecure,omitempty"`       // Skip TLS certificate verification (for self-signed certs)
 }
 
 // WebhookEmitter delivers events to an HTTP endpoint.
@@ -40,13 +42,18 @@ func NewWebhookEmitter(cfg WebhookConfig) *WebhookEmitter {
 		timeout = 10 * time.Second
 	}
 
+	httpClient := &http.Client{Timeout: timeout}
+	if cfg.Insecure {
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+
 	w := &WebhookEmitter{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: timeout,
-		},
-		queue: make(chan Event, 256),
-		done:  make(chan struct{}),
+		cfg:    cfg,
+		client: httpClient,
+		queue:  make(chan Event, 256),
+		done:   make(chan struct{}),
 	}
 
 	w.wg.Add(1)
