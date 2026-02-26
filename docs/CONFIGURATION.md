@@ -87,9 +87,11 @@ cli_maps:                    # Map CLI names to providers for `tokenomics run`
   node: generic
   curl: generic
 
+default_provider: ""           # Default provider when not specified in policy (e.g. "openai", "anthropic")
+
 # ── Session Ledger ───────────────────────────────────────────────────
 ledger:
-  enabled: false             # Enable per-session token tracking to .tokenomics/
+  enabled: true              # Enable per-session token tracking to .tokenomics/
   dir: ".tokenomics"         # Directory for session files
   memory: true               # Record conversation content in memory/ subdirectory
 ```
@@ -138,7 +140,8 @@ ledger:
 | `remote.webhook.callback_url` | (empty) | URL the central server will POST webhook events to. Required if `auto_register` is true. |
 | `remote.webhook.insecure` | `false` | Tell the server to skip TLS verification when delivering to this client. |
 | `cli_maps` | (see below) | Maps CLI names to providers for auto-detection in `tokenomics run`. Example: `claude: anthropic` means `tokenomics run claude` uses the anthropic provider. |
-| `ledger.enabled` | `false` | Enable per-session token tracking to the `.tokenomics/` directory. |
+| `default_provider` | (empty) | Default provider when not specified in policy (e.g. `openai`, `anthropic`). |
+| `ledger.enabled` | `true` | Enable per-session token tracking to the `.tokenomics/` directory. |
 | `ledger.dir` | `.tokenomics` | Directory for session files and memory logs. |
 | `ledger.memory` | `true` | Record conversation content (user/assistant messages) in memory markdown files. |
 
@@ -183,11 +186,16 @@ Every config field can be overridden with a `TOKENOMICS_` prefixed environment v
 | (logging output) | `TOKENOMICS_LOG_FILE` |
 | `logging.level` | `TOKENOMICS_LOGGING_LEVEL` |
 | `logging.format` | `TOKENOMICS_LOGGING_FORMAT` |
+| `logging.request_body` | `TOKENOMICS_LOGGING_REQUEST_BODY` |
+| `logging.response_body` | `TOKENOMICS_LOGGING_RESPONSE_BODY` |
+| `logging.hide_token_hash` | `TOKENOMICS_LOGGING_HIDE_TOKEN_HASH` |
 | `logging.disable_request` | `TOKENOMICS_LOGGING_DISABLE_REQUEST` |
 | `logging.proxy_log_file` | `TOKENOMICS_LOGGING_PROXY_LOG_FILE` |
+| `default_provider` | `TOKENOMICS_DEFAULT_PROVIDER` |
 | `remote.url` | `TOKENOMICS_REMOTE_URL` |
 | `remote.api_key` | `TOKENOMICS_REMOTE_API_KEY` |
 | `remote.sync` | `TOKENOMICS_REMOTE_SYNC` |
+| `remote.insecure` | `TOKENOMICS_REMOTE_INSECURE` |
 | `ledger.enabled` | `TOKENOMICS_LEDGER_ENABLED` |
 | `ledger.dir` | `TOKENOMICS_LEDGER_DIR` |
 | `ledger.memory` | `TOKENOMICS_LEDGER_MEMORY` |

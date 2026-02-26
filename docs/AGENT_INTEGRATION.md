@@ -17,33 +17,20 @@ There are three commands for connecting agents to the proxy:
 
 ## Quick Start: `tokenomics run` (Recommended)
 
-### Step 1: Install CA Certificate
-
-On first run, Tokenomics generates a self-signed CA certificate. You need to install it once:
-
 ```bash
-make build
-./bin/tokenomics serve  # Generates certs and shows installation instructions
+export OPENAI_API_KEY="<your-openai-api-key>"
+export TOKENOMICS_HASH_KEY="<any-random-secret-string>"
+
+tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}'
+# Copy the returned tkn_... value
+
+export TOKENOMICS_KEY="tkn_<paste-your-token-here>"
+tokenomics run python my_script.py
 ```
 
-The proxy will show something like:
+The `run` command defaults to plain HTTP on localhost, so no TLS certificates are needed for basic usage. If you enable TLS (`--tls`), see [TLS](TLS.md) for certificate setup.
 
-```
-CA cert for trust installation: certs/ca.crt
-On macOS: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain certs/ca.crt
-On Linux: sudo cp certs/ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
-```
-
-Follow the instructions for your OS. Once done, agents will trust the proxy's TLS certificate.
-
-### Step 2: Run Commands
-
-```bash
-export TOKENOMICS_KEY="tkn_my-wrapper-token"
-tokenomics run claude "What is AI?"
-```
-
-That's it! The `run` command:
+The `run` command:
 - Auto-detects which provider to use (claude → anthropic, python → generic, etc.)
 - Starts the proxy
 - Sets up environment variables

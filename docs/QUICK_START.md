@@ -1,6 +1,6 @@
 # Quick Start
 
-This guide gets Tokenomics running in a few minutes.
+Get up and running in three steps.
 
 ## 1) Install
 
@@ -8,68 +8,55 @@ This guide gets Tokenomics running in a few minutes.
 curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/install.sh | bash
 ```
 
-If the installer puts the binary in your current directory, move it to your PATH:
+Or build from source:
 
 ```bash
-sudo cp ./tokenomics /usr/local/bin/
+git clone https://github.com/rickcrawford/tokenomics.git
+cd tokenomics && make build
+sudo cp bin/tokenomics /usr/local/bin/
 ```
 
-Verify:
+Verify: `tokenomics --help`
+
+## 2) Set environment variables
+
+Two variables are required:
+
+| Variable | Purpose |
+|----------|---------|
+| `OPENAI_API_KEY` | The real provider API key you want to wrap |
+| `TOKENOMICS_HASH_KEY` | Secret used to hash wrapper tokens (pick any random string) |
 
 ```bash
-tokenomics --help
+export OPENAI_API_KEY="<your-openai-api-key>"
+export TOKENOMICS_HASH_KEY="<any-random-secret-string>"
 ```
 
-## 2) Set required secrets
+## 3) Create a token and run
+
+Create a wrapper token that wraps your OpenAI key:
 
 ```bash
-export TOKENOMICS_HASH_KEY="replace-with-random-secret"
-export OPENAI_API_KEY="sk-..."
+tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}'
 ```
 
-## 3) Start the proxy
+Copy the returned token (`tkn_...`) and run a command through the proxy:
 
 ```bash
-tokenomics serve
+export TOKENOMICS_KEY="tkn_<paste-your-token-here>"
+tokenomics run python my_script.py
 ```
 
-This creates `.tokenomics/` in your current directory and starts the proxy.
+The `run` command handles everything: it starts the proxy, configures environment variables, runs your command, and cleans up when done. No separate `serve` step is needed.
 
-## 4) Create a wrapper token
+## What just happened?
 
-Open another terminal:
-
-```bash
-tokenomics token create --policy '{
-  "base_key_env": "OPENAI_API_KEY",
-  "max_tokens": 100000
-}'
-```
-
-Copy the returned wrapper token (`tkn_...`).
-
-## 5) Send a request through Tokenomics
-
-```bash
-curl -s http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer tkn_your_wrapper_token" \
-  -d '{
-    "model": "gpt-4o-mini",
-    "messages": [{"role":"user","content":"Say hello in one sentence."}]
-  }'
-```
-
-## 6) Inspect usage and logs
-
-```bash
-tokenomics ledger summary
-ls -la .tokenomics/
-```
+1. Your real API key (`OPENAI_API_KEY`) stays on the server, never exposed to the command.
+2. The wrapper token (`tkn_...`) is what the command sees. It has no direct access to the real key.
+3. The proxy started on `http://localhost:8080`, forwarded the request to OpenAI, and shut down after the command finished.
 
 ## Next steps
 
-- Configure providers and defaults: `docs/CONFIGURATION.md`
-- Add guardrails and budgets: `docs/POLICIES.md`
-- Integrate with agents and CLI wrappers: `docs/AGENT_INTEGRATION.md`
-- Distribution and release details: `docs/DISTRIBUTION.md`
+- Add budgets, rate limits, and content rules to your token: [Policies](POLICIES.md)
+- Run multiple commands with a persistent proxy: [Agent Integration](AGENT_INTEGRATION.md)
+- Configure providers and settings: [Configuration](CONFIGURATION.md)

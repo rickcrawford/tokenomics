@@ -80,60 +80,29 @@ Verify: `tokenomics --help`
 
 ## Quick Start
 
-See the step-by-step guide: [Quick Start](docs/QUICK_START.md).
+Full guide: [Quick Start](docs/QUICK_START.md).
+
+**1. Set environment variables**
 
 ```bash
-# Install CA certificate (first time only)
-./bin/tokenomics serve  # Generates certs, shows install instructions
-
-# Set your wrapper token
-export TOKENOMICS_KEY="tkn_my-wrapper-token"
-
-# Run a single command through the proxy
-tokenomics run claude "What is the capital of France?"
+export OPENAI_API_KEY="<your-openai-api-key>"
+export TOKENOMICS_HASH_KEY="<any-random-secret-string>"
 ```
 
-The `run` command auto-detects the provider, starts the proxy, runs your command, and cleans up.
-
-For multiple commands, start the proxy separately:
+**2. Create a wrapper token**
 
 ```bash
-export TOKENOMICS_KEY="tkn_my-wrapper-token"
-tokenomics start              # Start proxy daemon
-eval $(tokenomics init)       # Set env vars for default provider
-
-claude "prompt 1"
-python script.py
-node app.js
-
-tokenomics stop               # Stop when done
+tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}'
 ```
 
-For development without certificates:
+**3. Run**
 
 ```bash
-tokenomics run --insecure claude "What is the capital of France?"
+export TOKENOMICS_KEY="tkn_<paste-your-token-here>"
+tokenomics run python my_script.py
 ```
 
-### Create a Token with Policies
-
-```bash
-export OPENAI_API_KEY="sk-your-real-key"
-
-./bin/tokenomics token create --policy '{
-  "base_key_env": "OPENAI_API_KEY",
-  "max_tokens": 100000,
-  "rules": [
-    {"type": "pii", "detect": ["ssn", "credit_card"], "action": "mask"},
-    {"type": "regex", "pattern": "(?i)ignore.*instructions", "action": "fail"}
-  ],
-  "memory": {
-    "enabled": true,
-    "file_path": "./memory",
-    "file_name": "{date}/{token_hash}.md"
-  }
-}'
-```
+The `run` command starts the proxy, configures environment variables, runs your command, and cleans up. No separate server setup needed.
 
 See [examples/](examples/) for provider configs, sample policies, and an end-to-end walkthrough.
 
