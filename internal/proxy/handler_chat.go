@@ -666,9 +666,13 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 				}
 			}
 
-			// Also check usage field (some providers include it)
+			// Also check usage field (some providers include it in stream chunks)
 			if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-				if completionTokens, ok := usage["completion_tokens"].(float64); ok {
+				// Try Anthropic's "output_tokens" first
+				if outputTokens, ok := usage["output_tokens"].(float64); ok {
+					totalOutputTokens = int(outputTokens)
+				} else if completionTokens, ok := usage["completion_tokens"].(float64); ok {
+					// Fall back to OpenAI's "completion_tokens"
 					totalOutputTokens = int(completionTokens)
 				}
 			}
@@ -691,14 +695,24 @@ func (h *Handler) countResponseTokens(body []byte, tokenHash string) int {
 	if !ok {
 		return 0
 	}
-	completionTokens, ok := usage["completion_tokens"].(float64)
-	if !ok {
+
+	// Try multiple field names for output tokens (different providers use different names)
+	var outputTokens float64
+
+	// Anthropic uses "output_tokens"
+	if ot, ok := usage["output_tokens"].(float64); ok {
+		outputTokens = ot
+	} else if ct, ok := usage["completion_tokens"].(float64); ok {
+		// OpenAI and others use "completion_tokens"
+		outputTokens = ct
+	} else {
 		return 0
 	}
-	if completionTokens > 0 {
-		h.sessions.AddUsage(tokenHash, int64(completionTokens))
+
+	if outputTokens > 0 {
+		h.sessions.AddUsage(tokenHash, int64(outputTokens))
 	}
-	return int(completionTokens)
+	return int(outputTokens)
 }
 
 // recordLedgerEntry records a request to the session ledger if configured.

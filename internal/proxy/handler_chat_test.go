@@ -96,31 +96,49 @@ func TestCountResponseTokens(t *testing.T) {
 		name string
 		body string
 		want int
+		desc string
 	}{
 		{
-			name: "valid usage",
+			name: "OpenAI completion_tokens",
 			body: `{"usage":{"completion_tokens":42}}`,
 			want: 42,
+			desc: "OpenAI format with completion_tokens",
+		},
+		{
+			name: "Anthropic output_tokens",
+			body: `{"usage":{"input_tokens":10,"output_tokens":25}}`,
+			want: 25,
+			desc: "Anthropic format with output_tokens",
 		},
 		{
 			name: "zero tokens",
 			body: `{"usage":{"completion_tokens":0}}`,
 			want: 0,
+			desc: "Zero completion tokens",
 		},
 		{
 			name: "no usage field",
 			body: `{"id":"test"}`,
 			want: 0,
+			desc: "Response without usage field",
 		},
 		{
 			name: "invalid json",
 			body: `{broken}`,
 			want: 0,
+			desc: "Malformed JSON",
 		},
 		{
-			name: "usage without completion_tokens",
-			body: `{"usage":{"prompt_tokens":10}}`,
+			name: "usage without token fields",
+			body: `{"usage":{"prompt_tokens":10,"cached_tokens":5}}`,
 			want: 0,
+			desc: "Usage object without output/completion tokens",
+		},
+		{
+			name: "Anthropic with null output_tokens",
+			body: `{"usage":{"input_tokens":10,"output_tokens":null}}`,
+			want: 0,
+			desc: "Anthropic format with null output_tokens",
 		},
 	}
 
@@ -128,7 +146,7 @@ func TestCountResponseTokens(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := handler.countResponseTokens([]byte(tt.body), "test-token")
 			if got != tt.want {
-				t.Errorf("countResponseTokens() = %d, want %d", got, tt.want)
+				t.Errorf("%s: got %d, want %d", tt.desc, got, tt.want)
 			}
 		})
 	}
