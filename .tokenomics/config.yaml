@@ -1,6 +1,10 @@
 # Tokenomics configuration
 # Full reference: https://github.com/rickcrawford/tokenomics/docs/CONFIGURATION.md
 
+ledger:
+  enabled: true
+  memory: true
+
 logging:
   level: info
   format: json

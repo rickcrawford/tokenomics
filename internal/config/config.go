@@ -220,8 +220,9 @@ func Load(cfgFile string) (*Config, error) {
 	v.SetDefault("security.encryption_key_env", "TOKENOMICS_ENCRYPTION_KEY")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
+	v.SetDefault("ledger.enabled", true)                    // Enable session ledger by default
 	v.SetDefault("ledger.dir", "")                          // empty = derive from dir at use time
-	v.SetDefault("ledger.memory", true)
+	v.SetDefault("ledger.memory", true)                     // Record conversation content
 
 	v.SetEnvPrefix("TOKENOMICS")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
