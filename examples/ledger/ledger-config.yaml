@@ -1,0 +1,11 @@
+# Minimal config to enable the session ledger.
+# Add this to your config.yaml or use as a standalone config with --config.
+
+server:
+  http_port: 8080
+  upstream_url: https://api.openai.com
+
+ledger:
+  enabled: true
+  dir: ".tokenomics"    # Session files go to .tokenomics/sessions/
+  memory: true           # Conversation content goes to .tokenomics/memory/

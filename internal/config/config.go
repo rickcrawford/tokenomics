@@ -16,6 +16,7 @@ type Config struct {
 	Providers map[string]ProviderConfig `mapstructure:"providers"`
 	Events    EventsConfig              `mapstructure:"events"`
 	Remote    RemoteConfig              `mapstructure:"remote"`
+	Ledger    LedgerConfig              `mapstructure:"ledger"`
 	CLIMaps   map[string]string         `mapstructure:"cli_maps"` // Map CLI names to providers (e.g. "claude" -> "anthropic")
 }
 
@@ -110,6 +111,13 @@ type SecurityConfig struct {
 	EncryptionKeyEnv string `mapstructure:"encryption_key_env"`
 }
 
+// LedgerConfig controls per-session token tracking to .tokenomics/.
+type LedgerConfig struct {
+	Enabled bool   `mapstructure:"enabled"` // Enable session ledger (default false)
+	Dir     string `mapstructure:"dir"`     // Output directory (default ".tokenomics")
+	Memory  bool   `mapstructure:"memory"`  // Record conversation content (default true)
+}
+
 func Load(cfgFile string) (*Config, error) {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
@@ -135,6 +143,8 @@ func Load(cfgFile string) (*Config, error) {
 	viper.SetDefault("security.encryption_key_env", "TOKENOMICS_ENCRYPTION_KEY")
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.format", "json")
+	viper.SetDefault("ledger.dir", ".tokenomics")
+	viper.SetDefault("ledger.memory", true)
 
 	viper.SetEnvPrefix("TOKENOMICS")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
