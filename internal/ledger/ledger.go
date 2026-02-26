@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -153,9 +154,23 @@ func (l *Ledger) RecordRequest(entry RequestEntry) {
 // RecordMemory writes conversation content to the memory log.
 func (l *Ledger) RecordMemory(tokenHash, role, model, content string) error {
 	if l.memWriter == nil {
+		log.Printf("[memory] memWriter is nil for tokenHash=%s, role=%s", tokenHash[:min(16, len(tokenHash))], role)
 		return nil
 	}
-	return l.memWriter.Append(tokenHash, role, model, content)
+	err := l.memWriter.Append(tokenHash, role, model, content)
+	if err != nil {
+		log.Printf("[memory] error appending - %v", err)
+	} else {
+		log.Printf("[memory] recorded %s | %s | %s (content length: %d)", tokenHash[:min(16, len(tokenHash))], role, model, len(content))
+	}
+	return err
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // SessionID returns the current session's ID.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -296,10 +297,10 @@ func TestGetLedgerDir(t *testing.T) {
 		t.Errorf("expected /custom/dir, got %s", got)
 	}
 
-	// Fallback to default
+	// Fallback to default - should be absolute path to .tokenomics
 	ledgerDir = ""
 	got := getLedgerDir()
-	if got != ".tokenomics" {
-		t.Errorf("expected .tokenomics default, got %s", got)
+	if !filepath.IsAbs(got) || !strings.Contains(got, ".tokenomics") {
+		t.Errorf("expected absolute path containing .tokenomics, got %s", got)
 	}
 }

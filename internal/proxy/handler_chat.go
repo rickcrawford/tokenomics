@@ -498,12 +498,14 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			}
 
 			// Buffered response
+			debugLog("Reading upstream response body (status=%d, content-length=%s)", resp.StatusCode, resp.Header.Get("Content-Length"))
 			respBody, err := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				logEntry.StatusCode = http.StatusBadGateway
 				logEntry.Error = "failed to read upstream response"
-				debugLog("Error reading upstream response: %v", err)
+				debugLog("ERROR reading upstream response: %v (bytes read: %d)", err, len(respBody))
+				log.Printf("[error] Failed to read upstream response for %s:%s - %v", tryModel, resolved.ProviderName, err)
 				httpError(w, http.StatusBadGateway, logEntry.Error)
 				h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, 0, true)
 				// Still record to ledger even on error
@@ -511,6 +513,7 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 					inputTokens, 0, http.StatusBadGateway, stream, retryCount, nil)
 				return
 			}
+			debugLog("Successfully read %d bytes from upstream response", len(respBody))
 
 			outputTokens := h.countResponseTokens(respBody, tokenHash)
 			logEntry.StatusCode = resp.StatusCode
@@ -543,16 +546,23 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			h.recordLedgerEntry(logEntry, tokenHash, tryModel, resolved.ProviderName,
 				inputTokens, outputTokens, resp.StatusCode, stream, retryCount,
 				extractProviderMeta(resp.Header, respBody))
+			debugLog("About to record memory: ledger=%v, isError=%v, userContent=%d, assistantContent=%d",
+				h.ledger != nil, isError, len(userContent), len(assistantContent))
 			if h.ledger != nil && !isError {
+				debugLog("Recording memory to ledger")
 				if userContent != "" {
+					debugLog("Recording user content: %d chars", len(userContent))
 					h.ledger.RecordMemory(tokenHash, "user", tryModel, userContent)
 				}
 				if assistantContent == "" {
 					assistantContent = extractAssistantContent(respBody)
 				}
 				if assistantContent != "" {
+					debugLog("Recording assistant content: %d chars", len(assistantContent))
 					h.ledger.RecordMemory(tokenHash, "assistant", tryModel, assistantContent)
 				}
+			} else {
+				debugLog("Skipping memory recording: ledger=%v, isError=%v", h.ledger != nil, isError)
 			}
 
 			copyHeaders(resp.Header, w.Header())

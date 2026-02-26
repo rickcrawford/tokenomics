@@ -246,6 +246,13 @@ func Load(cfgFile string) (*Config, error) {
 	if cfg.Dir == "" {
 		cfg.Dir = ".tokenomics"
 	}
+	// Convert to absolute path to avoid working directory issues
+	if !filepath.IsAbs(cfg.Dir) {
+		absDir, err := filepath.Abs(cfg.Dir)
+		if err == nil {
+			cfg.Dir = absDir
+		}
+	}
 	// If db_path is empty or still the old default, resolve it to use cfg.Dir
 	if cfg.Storage.DBPath == "" || cfg.Storage.DBPath == "./tokenomics.db" {
 		cfg.Storage.DBPath = filepath.Join(cfg.Dir, "tokenomics.db")

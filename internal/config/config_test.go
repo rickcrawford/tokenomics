@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -175,8 +176,12 @@ server:
 	if cfg.Server.HTTPSPort != 8443 {
 		t.Errorf("HTTPSPort = %d, want 8443", cfg.Server.HTTPSPort)
 	}
-	if cfg.Storage.DBPath != filepath.Join(".tokenomics", "tokenomics.db") {
-		t.Errorf("DBPath = %q, want %s", cfg.Storage.DBPath, filepath.Join(".tokenomics", "tokenomics.db"))
+	// Check that DBPath is absolute and contains .tokenomics/tokenomics.db
+	if !filepath.IsAbs(cfg.Storage.DBPath) {
+		t.Errorf("DBPath = %q, must be absolute", cfg.Storage.DBPath)
+	}
+	if !strings.Contains(cfg.Storage.DBPath, filepath.Join(".tokenomics", "tokenomics.db")) {
+		t.Errorf("DBPath = %q, must contain .tokenomics/tokenomics.db", cfg.Storage.DBPath)
 	}
 	if cfg.Session.Backend != "memory" {
 		t.Errorf("Session.Backend = %q, want memory", cfg.Session.Backend)
