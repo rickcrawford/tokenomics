@@ -235,6 +235,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(middleware.Heartbeat("/ping"))
 
+	// Add response compression (brotli preferred, fallback to gzip)
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cw := proxy.NewCompressionWriter(w, r)
+			defer cw.Close()
+			next.ServeHTTP(cw, r)
+		})
+	})
+
 	// Management endpoints (no auth required)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

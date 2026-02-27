@@ -3,9 +3,11 @@ module github.com/rickcrawford/tokenomics
 go 1.24.7
 
 require (
+	github.com/andybalholm/brotli v1.2.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
+	github.com/klauspost/compress v1.18.4
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/spf13/cobra v1.8.1
