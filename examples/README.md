@@ -275,3 +275,20 @@ source examples/distributed-team/.env.example
 ```
 
 See [`distributed-team/README.md`](distributed-team/README.md) for the full walkthrough.
+
+## Security Examples
+
+Content security policies with attack detection and data protection for production deployments. See the [security](security/) example for:
+
+- **Prompt Injection Detection** - Jailbreak detection, regex rules, and keyword warnings to block instruction manipulation attempts
+- **PII Redaction** - Masks sensitive data (emails, phones, SSNs, credit cards, passwords, API keys) in both input and output
+
+```bash
+# Prompt injection protection
+./bin/tokenomics token create --policy @examples/security/prompt-injection-detection.json
+
+# PII redaction and compliance logging
+./bin/tokenomics token create --policy @examples/security/pii-redaction.json
+```
+
+See [`security/README.md`](security/README.md) for detailed setup and testing instructions.
