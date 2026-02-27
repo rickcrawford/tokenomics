@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/rickcrawford/tokenomics/internal/policy"
 )
 
 // TestPassthrough_ExtractsModel verifies model field extracted from request body
@@ -15,14 +19,14 @@ func TestPassthrough_ExtractsModel(t *testing.T) {
 		"model":    "gpt-4",
 		"messages": []map[string]string{},
 	}
-	bodyBytes, _ := json.Marshal(reqBody)
-
-	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(bodyBytes))
+	if _, err := json.Marshal(reqBody); err != nil {
+		t.Fatalf("marshal request body failed: %v", err)
+	}
 
 	// We can't fully test passthrough without a policy, but we can verify body reading
 	// doesn't panic with oversized bodies
 	largeBody := make([]byte, maxRequestBodySize+1000)
-	req = httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(largeBody))
+	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(largeBody))
 
 	// This should not panic or hang due to unbounded read
 	bodyRead, err := io.ReadAll(io.LimitReader(req.Body, maxRequestBodySize))
@@ -158,5 +162,42 @@ func TestPassthrough_BodySizeCapped(t *testing.T) {
 		if b != 'X' {
 			t.Errorf("Byte %d: expected 'X', got %q", i, string(b))
 		}
+	}
+}
+
+func TestPassthrough_UsesTimeout(t *testing.T) {
+	t.Setenv("PT_TIMEOUT_KEY", "sk-timeout-test")
+
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1500 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte(`{"data":[]}`)); err != nil {
+			t.Fatalf("write upstream response: %v", err)
+		}
+	})
+	defer upstream.Close()
+
+	pol := &policy.Policy{
+		BaseKeyEnv: "PT_TIMEOUT_KEY",
+		Timeout:    1,
+	}
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
+	ts.Save(hashForTest(handler, "tkn_pt_timeout"), pol)
+
+	req := httptest.NewRequest("GET", "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer tkn_pt_timeout")
+	rr := httptest.NewRecorder()
+
+	start := time.Now()
+	handler.ServeHTTP(rr, req)
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 on timeout, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("request should time out quickly, elapsed=%v", elapsed)
 	}
 }

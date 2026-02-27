@@ -2,7 +2,7 @@
 
 ## What's Been Created
 
-This directory contains **complete, production-ready example configurations** for integrating OpenClaw with Tokenomics. All files are fully self-contained and can be used immediately.
+This directory contains example configurations for integrating OpenClaw with Tokenomics. Treat these as starting points and validate them for your environment before production use.
 
 ### Files Created
 
@@ -195,7 +195,7 @@ docker-compose up -d
 
 # Copy agent configs
 cp agents/slack-config.json ~/.openclaw/agents/slack-config.json
-# Edit to add token hash from creation step
+# Edit to add raw token (`tkn_...`) from creation step
 
 # Start OpenClaw agents
 openclaw start --config ~/.openclaw/agents/slack-config.json
@@ -290,7 +290,7 @@ Each policy demonstrates:
 
 Each agent config includes:
 - ✓ Tokenomics endpoint URL
-- ✓ Token hash from policy creation
+- ✓ Raw token from policy creation
 - ✓ LLM model selection
 - ✓ Platform-specific config (Slack, Discord, iOS/macOS/Android)
 - ✓ Skill enablement and restrictions

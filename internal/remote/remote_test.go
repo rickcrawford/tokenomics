@@ -1,11 +1,17 @@
 package remote
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/rickcrawford/tokenomics/internal/events"
+	"github.com/rickcrawford/tokenomics/internal/config"
 	"github.com/rickcrawford/tokenomics/internal/policy"
 	"github.com/rickcrawford/tokenomics/internal/store"
 )
@@ -81,8 +87,12 @@ func (m *memStore) List() ([]store.TokenRecord, error) {
 
 func TestServerListTokens(t *testing.T) {
 	ms := newMemStore()
-	ms.Create("hash1", `{"base_key_env":"OPENAI_API_KEY"}`, "")
-	ms.Create("hash2", `{"base_key_env":"ANTHROPIC_API_KEY"}`, "2026-01-01T00:00:00Z")
+	if err := ms.Create("hash1", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed hash1: %v", err)
+	}
+	if err := ms.Create("hash2", `{"base_key_env":"ANTHROPIC_API_KEY"}`, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("seed hash2: %v", err)
+	}
 
 	srv := NewServer(ms, "")
 	ts := httptest.NewServer(srv)
@@ -110,7 +120,9 @@ func TestServerListTokens(t *testing.T) {
 
 func TestServerGetTokenByHash(t *testing.T) {
 	ms := newMemStore()
-	ms.Create("abc123", `{"base_key_env":"OPENAI_API_KEY"}`, "")
+	if err := ms.Create("abc123", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed abc123: %v", err)
+	}
 
 	srv := NewServer(ms, "")
 	ts := httptest.NewServer(srv)
@@ -172,6 +184,14 @@ func TestServerAuth(t *testing.T) {
 		t.Fatalf("expected 403 with wrong key, got %d", resp.StatusCode)
 	}
 
+	// Missing Bearer prefix should be rejected as missing authorization.
+	req, _ = http.NewRequest("GET", ts.URL+"/api/v1/tokens", nil)
+	req.Header.Set("Authorization", "wrong-format")
+	resp, _ = http.DefaultClient.Do(req)
+	if resp.StatusCode != 401 {
+		t.Fatalf("expected 401 with invalid auth header format, got %d", resp.StatusCode)
+	}
+
 	// Correct key
 	req, _ = http.NewRequest("GET", ts.URL+"/api/v1/tokens", nil)
 	req.Header.Set("Authorization", "Bearer secret-key")
@@ -211,7 +231,9 @@ func TestServerMethodNotAllowed(t *testing.T) {
 
 func TestClientFetchTokens(t *testing.T) {
 	ms := newMemStore()
-	ms.Create("hash1", `{"base_key_env":"OPENAI_API_KEY"}`, "")
+	if err := ms.Create("hash1", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed hash1: %v", err)
+	}
 
 	srv := NewServer(ms, "my-key")
 	ts := httptest.NewServer(srv)
@@ -253,8 +275,12 @@ func TestClientFetchUnauthorized(t *testing.T) {
 func TestClientSyncTo(t *testing.T) {
 	// Remote store has 2 tokens
 	remoteStore := newMemStore()
-	remoteStore.Create("hash-a", `{"base_key_env":"OPENAI_API_KEY"}`, "")
-	remoteStore.Create("hash-b", `{"base_key_env":"ANTHROPIC_API_KEY"}`, "2026-06-01T00:00:00Z")
+	if err := remoteStore.Create("hash-a", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed remote hash-a: %v", err)
+	}
+	if err := remoteStore.Create("hash-b", `{"base_key_env":"ANTHROPIC_API_KEY"}`, "2026-06-01T00:00:00Z"); err != nil {
+		t.Fatalf("seed remote hash-b: %v", err)
+	}
 
 	srv := NewServer(remoteStore, "")
 	ts := httptest.NewServer(srv)
@@ -293,14 +319,18 @@ func TestClientSyncTo(t *testing.T) {
 
 func TestClientSyncToUpdatesChanged(t *testing.T) {
 	remoteStore := newMemStore()
-	remoteStore.Create("hash-x", `{"base_key_env":"OPENAI_API_KEY"}`, "")
+	if err := remoteStore.Create("hash-x", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed remote hash-x: %v", err)
+	}
 
 	srv := NewServer(remoteStore, "")
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	localStore := newMemStore()
-	localStore.Create("hash-x", `{"base_key_env":"OLD_KEY"}`, "")
+	if err := localStore.Create("hash-x", `{"base_key_env":"OLD_KEY"}`, ""); err != nil {
+		t.Fatalf("seed local hash-x: %v", err)
+	}
 
 	client := NewClient(ts.URL, "", nil)
 	n, err := client.SyncTo(localStore)
@@ -320,14 +350,18 @@ func TestClientSyncToUpdatesChanged(t *testing.T) {
 func TestClientSyncToPreservesLocalOnly(t *testing.T) {
 	// Remote has 1 token, local has 2 (one is local-only)
 	remoteStore := newMemStore()
-	remoteStore.Create("hash-remote", `{"base_key_env":"OPENAI_API_KEY"}`, "")
+	if err := remoteStore.Create("hash-remote", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed remote hash-remote: %v", err)
+	}
 
 	srv := NewServer(remoteStore, "")
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	localStore := newMemStore()
-	localStore.Create("hash-local", `{"base_key_env":"LOCAL_KEY"}`, "")
+	if err := localStore.Create("hash-local", `{"base_key_env":"LOCAL_KEY"}`, ""); err != nil {
+		t.Fatalf("seed local hash-local: %v", err)
+	}
 
 	client := NewClient(ts.URL, "", nil)
 	n, err := client.SyncTo(localStore)
@@ -356,6 +390,87 @@ func TestHTTPError(t *testing.T) {
 	if e.Error() != "remote server returned Service Unavailable" {
 		t.Fatalf("unexpected error message: %s", e.Error())
 	}
+}
+
+func TestClient_StartPeriodicSync_Interval(t *testing.T) {
+	remoteStore := newMemStore()
+	srv := NewServer(remoteStore, "")
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	localStore := newMemStore()
+	client := NewClient(ts.URL, "", nil)
+	defer client.Stop()
+
+	client.StartPeriodicSync(localStore, 20*time.Millisecond)
+
+	// Add token after sync loop starts so periodic behavior is required.
+	time.Sleep(40 * time.Millisecond)
+	if err := remoteStore.Create("periodic-hash", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed remote token: %v", err)
+	}
+
+	deadline := time.Now().Add(750 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		rec, err := localStore.Get("periodic-hash")
+		if err != nil {
+			t.Fatalf("local get: %v", err)
+		}
+		if rec != nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("expected token to be synced by periodic sync")
+}
+
+type flakyTransport struct {
+	failuresLeft int32
+	delegate     http.RoundTripper
+}
+
+func (f *flakyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if atomic.LoadInt32(&f.failuresLeft) > 0 {
+		atomic.AddInt32(&f.failuresLeft, -1)
+		return nil, errors.New("simulated network failure")
+	}
+	return f.delegate.RoundTrip(req)
+}
+
+func TestClient_StartPeriodicSync_RecoversFromNetworkFailure(t *testing.T) {
+	remoteStore := newMemStore()
+	if err := remoteStore.Create("recover-hash", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed remote token: %v", err)
+	}
+	srv := NewServer(remoteStore, "")
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	localStore := newMemStore()
+	httpClient := &http.Client{
+		Timeout: 200 * time.Millisecond,
+		Transport: &flakyTransport{
+			failuresLeft: 2,
+			delegate:     http.DefaultTransport,
+		},
+	}
+	client := NewClient(ts.URL, "", httpClient)
+	defer client.Stop()
+
+	client.StartPeriodicSync(localStore, 25*time.Millisecond)
+
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		rec, err := localStore.Get("recover-hash")
+		if err != nil {
+			t.Fatalf("local get: %v", err)
+		}
+		if rec != nil {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("expected periodic sync to recover after transient network failures")
 }
 
 func TestClientRegisterWebhook(t *testing.T) {
@@ -471,5 +586,79 @@ func TestClientUnregisterWebhookNotFound(t *testing.T) {
 	err = client.UnregisterWebhook("cl_nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent client")
+	}
+}
+
+func TestRemoteIntegration_WebhookPushAndPollSync(t *testing.T) {
+	remoteStore := newMemStore()
+	if err := remoteStore.Create("hash-push", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed remote token: %v", err)
+	}
+
+	registry, err := NewClientRegistry(tempRegistryDB(t))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	defer registry.Close()
+
+	server := NewServer(remoteStore, "sync-key", registry)
+	serverTS := httptest.NewServer(server)
+	defer serverTS.Close()
+
+	localStore := newMemStore()
+	remoteClient := NewClient(serverTS.URL, "sync-key", nil)
+	receiver := NewWebhookReceiver(config.WebhookReceiver{
+		Enabled: true,
+		Path:    "/v1/webhook",
+	}, localStore, remoteClient)
+	receiverTS := httptest.NewServer(http.HandlerFunc(receiver.ServeHTTP))
+	defer receiverTS.Close()
+
+	// Register local receiver as a webhook client on the central server.
+	client := NewClient(serverTS.URL, "sync-key", nil)
+	if _, err := client.RegisterWebhook(ClientRegistration{
+		URL:    receiverTS.URL + "/v1/webhook",
+		Events: []string{"token.*"},
+	}); err != nil {
+		t.Fatalf("register webhook: %v", err)
+	}
+
+	// Push path: emit token.created to webhook clients -> receiver -> remote sync.
+	if err := registry.Emit(context.Background(), events.New(events.TokenCreated, map[string]interface{}{
+		"token_hash": "hash-push",
+	})); err != nil {
+		t.Fatalf("registry emit: %v", err)
+	}
+
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		rec, err := localStore.Get("hash-push")
+		if err != nil {
+			t.Fatalf("local get after push: %v", err)
+		}
+		if rec != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	rec, err := localStore.Get("hash-push")
+	if err != nil {
+		t.Fatalf("local get: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("expected token synced via webhook push path")
+	}
+
+	// Poll path: add new token remotely and sync by pull.
+	if err := remoteStore.Create("hash-poll", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed poll token: %v", err)
+	}
+	n, err := client.SyncTo(localStore)
+	if err != nil {
+		t.Fatalf("poll sync: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("expected poll sync to add/update at least one token")
 	}
 }

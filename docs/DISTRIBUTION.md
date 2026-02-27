@@ -90,8 +90,8 @@ After installation, configure environment variables:
 # Create config directory
 mkdir -p ~/.tokenomics
 
-# Copy example config (if available)
-cp docs/config.yaml.example ~/.tokenomics/config.yaml
+# Optional: copy an example config as a starting point
+cp examples/config.yaml ~/.tokenomics/config.yaml
 
 # Set API keys
 export OPENAI_PAT="sk-..."
@@ -228,9 +228,9 @@ RUN apt-get update && apt-get install -y curl
 RUN curl -fsSL https://github.com/rickcrawford/tokenomics/releases/latest/download/install.sh | bash
 ```
 
-### Approach 3: Package Manager
+### Approach 3: Package Managers
 
-Consider creating packages for popular package managers (apt, brew, etc.) once the project is widely used.
+Homebrew, APT, and Chocolatey packages are not currently published. Use GitHub Releases or internal packaging workflows.
 
 ## Release Notes
 

@@ -180,9 +180,15 @@ func TestStreamingWriter_SSEAccumulates(t *testing.T) {
 	chunk3 := `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}
 `
 
-	sw.Write([]byte(chunk1))
-	sw.Write([]byte(chunk2))
-	sw.Write([]byte(chunk3))
+	if _, err := sw.Write([]byte(chunk1)); err != nil {
+		t.Fatalf("write chunk1 failed: %v", err)
+	}
+	if _, err := sw.Write([]byte(chunk2)); err != nil {
+		t.Fatalf("write chunk2 failed: %v", err)
+	}
+	if _, err := sw.Write([]byte(chunk3)); err != nil {
+		t.Fatalf("write chunk3 failed: %v", err)
+	}
 
 	if got := sw.GetAssistantContent(); got != "Hello world" {
 		t.Errorf("Expected assistant content 'Hello world', got %q", got)
@@ -203,7 +209,9 @@ func TestStreamingWriter_SizeCap(t *testing.T) {
 		largeText[i] = 'A'
 	}
 
-	sw.Write(largeText)
+	if _, err := sw.Write(largeText); err != nil {
+		t.Fatalf("write large text failed: %v", err)
+	}
 	if got := len(sw.GetResponseContent()); got != maxResponseBodySize {
 		t.Errorf("Expected response capture to cap at %d, got %d", maxResponseBodySize, got)
 	}
@@ -222,8 +230,12 @@ func TestStreamingWriter_MultiChunkLine(t *testing.T) {
 	part2 := `"text":"Split line"}}
 `
 
-	sw.Write([]byte(part1))
-	sw.Write([]byte(part2))
+	if _, err := sw.Write([]byte(part1)); err != nil {
+		t.Fatalf("write part1 failed: %v", err)
+	}
+	if _, err := sw.Write([]byte(part2)); err != nil {
+		t.Fatalf("write part2 failed: %v", err)
+	}
 
 	if got := sw.GetAssistantContent(); got != "Split line" {
 		t.Errorf("Expected 'Split line', got %q", got)
@@ -244,7 +256,9 @@ func TestStreamingWriter_ExtractsUsageFromAnthropicStream(t *testing.T) {
 	}
 
 	for _, chunk := range chunks {
-		sw.Write([]byte(chunk))
+		if _, err := sw.Write([]byte(chunk)); err != nil {
+			t.Fatalf("write chunk failed: %v", err)
+		}
 	}
 
 	in, out := sw.GetTokenCounts()

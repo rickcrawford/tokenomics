@@ -92,7 +92,9 @@ func (wr *WebhookReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Only sync on token lifecycle events
 	if !isTokenEvent(event.Type) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ignored","reason":"not a token event"}`))
+		if _, err := w.Write([]byte(`{"status":"ignored","reason":"not a token event"}`)); err != nil {
+			log.Printf("[webhook-receiver] write ignored response failed: %v", err)
+		}
 		return
 	}
 
@@ -101,7 +103,9 @@ func (wr *WebhookReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if time.Since(wr.lastSync) < time.Second {
 		wr.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"debounced"}`))
+		if _, err := w.Write([]byte(`{"status":"debounced"}`)); err != nil {
+			log.Printf("[webhook-receiver] write debounced response failed: %v", err)
+		}
 		return
 	}
 	wr.lastSync = time.Now()
@@ -111,7 +115,9 @@ func (wr *WebhookReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go wr.sync(event.Type)
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"accepted"}`))
+	if _, err := w.Write([]byte(`{"status":"accepted"}`)); err != nil {
+		log.Printf("[webhook-receiver] write accepted response failed: %v", err)
+	}
 }
 
 // sync triggers either a full remote sync or a local store reload.

@@ -55,7 +55,9 @@ func BenchmarkRateLimiter_Allow(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rl.Allow("token1", cfg)
+		if err := rl.Allow("token1", cfg); err != nil {
+			b.Fatalf("allow failed: %v", err)
+		}
 	}
 }
 
@@ -72,7 +74,9 @@ func BenchmarkRateLimiter_Allow_MultiRule(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rl.Acquire("token1", cfg)
-		rl.Allow("token1", cfg)
+		if err := rl.Allow("token1", cfg); err != nil {
+			b.Fatalf("allow failed: %v", err)
+		}
 		rl.Release("token1", cfg)
 	}
 }
@@ -85,7 +89,9 @@ func BenchmarkRateLimiter_RecordTokens(b *testing.B) {
 		},
 	}
 	// Initialize bucket
-	rl.Allow("token1", cfg)
+	if err := rl.Allow("token1", cfg); err != nil {
+		b.Fatalf("allow failed: %v", err)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		rl.RecordTokens("token1", cfg, 100)
@@ -129,7 +135,9 @@ func BenchmarkHandler_ServeHTTP_ChatCompletions(b *testing.B) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"chatcmpl-bench","choices":[{"message":{"content":"hi"}}],"usage":{"completion_tokens":1}}`))
+		if _, err := w.Write([]byte(`{"id":"chatcmpl-bench","choices":[{"message":{"content":"hi"}}],"usage":{"completion_tokens":1}}`)); err != nil {
+			b.Fatalf("write response failed: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -137,7 +145,9 @@ func BenchmarkHandler_ServeHTTP_ChatCompletions(b *testing.B) {
 	handler := NewHandler(ts, session.NewMemoryStore(), []byte("benchkey"), upstream.URL, nil, nil)
 
 	pol := &policy.Policy{BaseKeyEnv: "BENCH_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		b.Fatalf("policy validate failed: %v", err)
+	}
 	ts.Save(handler.hashToken("tkn_bench"), pol)
 
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}`
@@ -157,7 +167,9 @@ func BenchmarkHandler_ServeHTTP_Passthrough(b *testing.B) {
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[]}`))
+		if _, err := w.Write([]byte(`{"data":[]}`)); err != nil {
+			b.Fatalf("write response failed: %v", err)
+		}
 	}))
 	defer upstream.Close()
 
@@ -165,7 +177,9 @@ func BenchmarkHandler_ServeHTTP_Passthrough(b *testing.B) {
 	handler := NewHandler(ts, session.NewMemoryStore(), []byte("benchkey"), upstream.URL, nil, nil)
 
 	pol := &policy.Policy{BaseKeyEnv: "BENCH_PT_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		b.Fatalf("policy validate failed: %v", err)
+	}
 	ts.Save(handler.hashToken("tkn_bench_pt"), pol)
 
 	b.ResetTimer()

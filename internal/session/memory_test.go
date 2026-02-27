@@ -28,7 +28,7 @@ func TestGetUsage(t *testing.T) {
 		{
 			name: "existing token returns stored value",
 			setup: func(m *MemoryStore) {
-				m.AddUsage("token_a", 100)
+				_, _ = m.AddUsage("token_a", 100)
 			},
 			tokenHash: "token_a",
 			want:      100,
@@ -36,8 +36,8 @@ func TestGetUsage(t *testing.T) {
 		{
 			name: "different tokens are independent",
 			setup: func(m *MemoryStore) {
-				m.AddUsage("token_x", 50)
-				m.AddUsage("token_y", 200)
+				_, _ = m.AddUsage("token_x", 50)
+				_, _ = m.AddUsage("token_y", 200)
 			},
 			tokenHash: "token_x",
 			want:      50,
@@ -144,7 +144,7 @@ func TestReset(t *testing.T) {
 		{
 			name: "reset existing token clears usage",
 			setup: func(m *MemoryStore) {
-				m.AddUsage("to_reset", 500)
+				_, _ = m.AddUsage("to_reset", 500)
 			},
 			resetKey:  "to_reset",
 			checkKey:  "to_reset",
@@ -160,8 +160,8 @@ func TestReset(t *testing.T) {
 		{
 			name: "reset one token does not affect others",
 			setup: func(m *MemoryStore) {
-				m.AddUsage("keep", 100)
-				m.AddUsage("remove", 200)
+				_, _ = m.AddUsage("keep", 100)
+				_, _ = m.AddUsage("remove", 200)
 			},
 			resetKey:  "remove",
 			checkKey:  "keep",
@@ -233,7 +233,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func() {
 			defer wg.Done()
-			m.AddUsage("mixed_token", 1)
+			_, _ = m.AddUsage("mixed_token", 1)
 		}()
 	}
 
@@ -241,7 +241,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func() {
 			defer wg.Done()
-			m.GetUsage("mixed_token")
+			_, _ = m.GetUsage("mixed_token")
 		}()
 	}
 
@@ -249,7 +249,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func() {
 			defer wg.Done()
-			m.Reset("other_token")
+			_ = m.Reset("other_token")
 		}()
 	}
 

@@ -2,6 +2,7 @@ package remote
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -54,12 +55,12 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	auth := r.Header.Get("Authorization")
-	if auth == "" {
+	if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
 		http.Error(w, `{"error":"missing authorization"}`, http.StatusUnauthorized)
 		return false
 	}
 	token := strings.TrimPrefix(auth, "Bearer ")
-	if token == auth || token != s.apiKey {
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.apiKey)) != 1 {
 		http.Error(w, `{"error":"invalid api key"}`, http.StatusForbidden)
 		return false
 	}
@@ -100,7 +101,9 @@ func (s *Server) handleTokens(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("encode tokens response: %v", err)
+	}
 }
 
 func (s *Server) handleTokenByHash(w http.ResponseWriter, r *http.Request) {
@@ -136,12 +139,16 @@ func (s *Server) handleTokenByHash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("encode token response: %v", err)
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"ok"}`))
+	if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+		log.Printf("health write error: %v", err)
+	}
 }
 
 // handleClients handles GET (list) and POST (register) for webhook clients.
@@ -198,7 +205,9 @@ func (s *Server) listClients(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(clients)
+	if err := json.NewEncoder(w).Encode(clients); err != nil {
+		log.Printf("encode clients response: %v", err)
+	}
 }
 
 func (s *Server) registerClient(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +230,9 @@ func (s *Server) registerClient(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(reg)
+	if err := json.NewEncoder(w).Encode(reg); err != nil {
+		log.Printf("encode register client response: %v", err)
+	}
 }
 
 func (s *Server) getClient(w http.ResponseWriter, id string) {
@@ -241,7 +252,9 @@ func (s *Server) getClient(w http.ResponseWriter, id string) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(client)
+	if err := json.NewEncoder(w).Encode(client); err != nil {
+		log.Printf("encode client response: %v", err)
+	}
 }
 
 func (s *Server) deleteClient(w http.ResponseWriter, id string) {
@@ -256,7 +269,9 @@ func (s *Server) deleteClient(w http.ResponseWriter, id string) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"deleted"}`))
+	if _, err := w.Write([]byte(`{"status":"deleted"}`)); err != nil {
+		log.Printf("delete client write error: %v", err)
+	}
 }
 
 // Client fetches tokens from a remote config server and syncs them

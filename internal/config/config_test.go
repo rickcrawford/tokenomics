@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func setenv(t *testing.T, key, value string) {
+	t.Helper()
+	old, had := os.LookupEnv(key)
+	if err := os.Setenv(key, value); err != nil {
+		t.Fatalf("setenv %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv(key, old)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
+}
+
 func TestLoadProviders(t *testing.T) {
 	dir := t.TempDir()
 	providersYAML := `
@@ -405,8 +420,14 @@ func TestLoadProviders_ReturnsDefaults(t *testing.T) {
 	// This tests the "no file found" path in standard search paths
 	dir := t.TempDir()
 	cwd, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(cwd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
 
 	providers, err := LoadProviders("")
 	if err != nil {
@@ -545,5 +566,51 @@ providers:
 	// Other defaults should still be present
 	if _, ok := cfg.Providers["openai"]; !ok {
 		t.Error("expected openai provider from defaults")
+	}
+}
+
+func TestLoad_EnvOverridesFile(t *testing.T) {
+	dir := t.TempDir()
+	configYAML := `
+server:
+  upstream_url: https://api.openai.com
+  http_port: 7000
+`
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(configYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	setenv(t, "TOKENOMICS_SERVER_HTTP_PORT", "9091")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.Server.HTTPPort != 9091 {
+		t.Fatalf("expected env override http_port=9091, got %d", cfg.Server.HTTPPort)
+	}
+}
+
+func TestLoad_EnvDefaultProviderBinding(t *testing.T) {
+	dir := t.TempDir()
+	configYAML := `
+server:
+  upstream_url: https://api.openai.com
+default_provider: openai
+`
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(configYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	setenv(t, "TOKENOMICS_DEFAULT_PROVIDER", "anthropic")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.DefaultProvider != "anthropic" {
+		t.Fatalf("expected env default_provider override to anthropic, got %q", cfg.DefaultProvider)
 	}
 }

@@ -70,6 +70,38 @@ func TestClientRegistry_RegisterRequiresURL(t *testing.T) {
 	}
 }
 
+func TestClientRegistry_RegisterRejectsInvalidURL(t *testing.T) {
+	cr, err := NewClientRegistry(tempRegistryDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cr.Close()
+
+	_, err = cr.Register(ClientRegistration{URL: "javascript:alert(1)"})
+	if err == nil {
+		t.Fatal("expected error for invalid url scheme")
+	}
+	if !strings.Contains(err.Error(), "invalid url scheme") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestClientRegistry_RegisterRejectsMissingHost(t *testing.T) {
+	cr, err := NewClientRegistry(tempRegistryDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cr.Close()
+
+	_, err = cr.Register(ClientRegistration{URL: "https://"})
+	if err == nil {
+		t.Fatal("expected error for missing host")
+	}
+	if !strings.Contains(err.Error(), "host is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestClientRegistry_Unregister(t *testing.T) {
 	cr, err := NewClientRegistry(tempRegistryDB(t))
 	if err != nil {
@@ -165,8 +197,12 @@ func TestClientRegistry_Persistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cr.Register(ClientRegistration{URL: "https://persistent.example.com/hook"})
-	cr.Close()
+	if _, err := cr.Register(ClientRegistration{URL: "https://persistent.example.com/hook"}); err != nil {
+		t.Fatalf("register client: %v", err)
+	}
+	if err := cr.Close(); err != nil {
+		t.Fatalf("close registry: %v", err)
+	}
 
 	// Reopen and verify
 	cr2, err := NewClientRegistry(dbPath)
@@ -205,11 +241,15 @@ func TestClientRegistry_EmitToRegisteredClients(t *testing.T) {
 	}
 	defer cr.Close()
 
-	cr.Register(ClientRegistration{URL: ts.URL})
+	if _, err := cr.Register(ClientRegistration{URL: ts.URL}); err != nil {
+		t.Fatalf("register client: %v", err)
+	}
 
-	cr.Emit(context.Background(), events.New(events.TokenCreated, map[string]interface{}{
+	if err := cr.Emit(context.Background(), events.New(events.TokenCreated, map[string]interface{}{
 		"token_hash": "abc123",
-	}))
+	})); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
 
 	// Close to drain the emitter queues
 	cr.Close()
@@ -250,10 +290,16 @@ func TestClientRegistry_EmitToMultipleClients(t *testing.T) {
 	}
 	defer cr.Close()
 
-	cr.Register(ClientRegistration{URL: ts1.URL})
-	cr.Register(ClientRegistration{URL: ts2.URL})
+	if _, err := cr.Register(ClientRegistration{URL: ts1.URL}); err != nil {
+		t.Fatalf("register client ts1: %v", err)
+	}
+	if _, err := cr.Register(ClientRegistration{URL: ts2.URL}); err != nil {
+		t.Fatalf("register client ts2: %v", err)
+	}
 
-	cr.Emit(context.Background(), events.New(events.TokenCreated, nil))
+	if err := cr.Emit(context.Background(), events.New(events.TokenCreated, nil)); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
 	cr.Close()
 
 	mu.Lock()
@@ -281,13 +327,19 @@ func TestClientRegistry_EmitWithEventFilter(t *testing.T) {
 	}
 	defer cr.Close()
 
-	cr.Register(ClientRegistration{
+	if _, err := cr.Register(ClientRegistration{
 		URL:    ts.URL,
 		Events: []string{"token.*"},
-	})
+	}); err != nil {
+		t.Fatalf("register filtered client: %v", err)
+	}
 
-	cr.Emit(context.Background(), events.New(events.TokenCreated, nil))
-	cr.Emit(context.Background(), events.New(events.RuleViolation, nil)) // Should be filtered
+	if err := cr.Emit(context.Background(), events.New(events.TokenCreated, nil)); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
+	if err := cr.Emit(context.Background(), events.New(events.RuleViolation, nil)); err != nil { // Should be filtered
+		t.Fatalf("emit rule.violation: %v", err)
+	}
 	cr.Close()
 
 	mu.Lock()
@@ -369,8 +421,12 @@ func TestServerListClients(t *testing.T) {
 	}
 	defer cr.Close()
 
-	cr.Register(ClientRegistration{URL: "https://proxy-1.example.com/hook"})
-	cr.Register(ClientRegistration{URL: "https://proxy-2.example.com/hook"})
+	if _, err := cr.Register(ClientRegistration{URL: "https://proxy-1.example.com/hook"}); err != nil {
+		t.Fatalf("register client 1: %v", err)
+	}
+	if _, err := cr.Register(ClientRegistration{URL: "https://proxy-2.example.com/hook"}); err != nil {
+		t.Fatalf("register client 2: %v", err)
+	}
 
 	srv := NewServer(ms, "", cr)
 	ts := httptest.NewServer(srv)
@@ -623,12 +679,16 @@ func TestServerTokenEventPushesToRegisteredClient(t *testing.T) {
 	}
 	defer cr.Close()
 
-	cr.Register(ClientRegistration{URL: webhookServer.URL})
+	if _, err := cr.Register(ClientRegistration{URL: webhookServer.URL}); err != nil {
+		t.Fatalf("register webhook client: %v", err)
+	}
 
 	// Emit a token event through the registry
-	cr.Emit(context.Background(), events.New(events.TokenCreated, map[string]interface{}{
+	if err := cr.Emit(context.Background(), events.New(events.TokenCreated, map[string]interface{}{
 		"token_hash": "test1234",
-	}))
+	})); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
 
 	// Close drains the queue
 	cr.Close()
@@ -664,14 +724,20 @@ func TestClientRegistry_UnregisterStopsEmitter(t *testing.T) {
 	reg, _ := cr.Register(ClientRegistration{URL: ts.URL})
 
 	// Emit first event
-	cr.Emit(context.Background(), events.New(events.TokenCreated, nil))
+	if err := cr.Emit(context.Background(), events.New(events.TokenCreated, nil)); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
 	time.Sleep(100 * time.Millisecond) // Let async delivery complete
 
 	// Unregister
-	cr.Unregister(reg.ID)
+	if err := cr.Unregister(reg.ID); err != nil {
+		t.Fatalf("unregister client: %v", err)
+	}
 
 	// Emit second event - should not be delivered
-	cr.Emit(context.Background(), events.New(events.TokenUpdated, nil))
+	if err := cr.Emit(context.Background(), events.New(events.TokenUpdated, nil)); err != nil {
+		t.Fatalf("emit token.updated: %v", err)
+	}
 	time.Sleep(100 * time.Millisecond)
 
 	mu.Lock()

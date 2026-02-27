@@ -178,7 +178,9 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			rl.Allow("token1", cfg)
+			if err := rl.Allow("token1", cfg); err != nil {
+				t.Errorf("allow failed: %v", err)
+			}
 			rl.RecordTokens("token1", cfg, 10)
 		}()
 	}
@@ -204,5 +206,49 @@ func TestParseWindow(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("parseWindow(%q) = %v, want %v", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestRateLimiter_GCStaleBuckets(t *testing.T) {
+	rl := NewRateLimiter()
+	cfg := &policy.RateLimitConfig{
+		Rules: []policy.RateLimitRule{
+			{Requests: 1, Window: "1m"},
+		},
+	}
+
+	// Seed one stale bucket and force cleanup to run.
+	rl.buckets["stale-token"] = &tokenBucket{
+		lastSeen: time.Now().Add(-25 * time.Hour),
+	}
+	rl.lastGC = time.Now().Add(-2 * time.Minute)
+
+	_ = rl.getBucket("fresh-token", cfg)
+
+	if _, ok := rl.buckets["stale-token"]; ok {
+		t.Fatal("expected stale bucket to be garbage-collected")
+	}
+	if _, ok := rl.buckets["fresh-token"]; !ok {
+		t.Fatal("expected fresh bucket to exist")
+	}
+}
+
+func TestRateLimiter_DoesNotGCActiveParallelBucket(t *testing.T) {
+	rl := NewRateLimiter()
+	cfg := &policy.RateLimitConfig{
+		MaxParallel: 1,
+	}
+
+	active := &tokenBucket{
+		lastSeen: time.Now().Add(-25 * time.Hour),
+	}
+	active.parallel.Add(1)
+	rl.buckets["active-token"] = active
+	rl.lastGC = time.Now().Add(-2 * time.Minute)
+
+	_ = rl.getBucket("fresh-token", cfg)
+
+	if _, ok := rl.buckets["active-token"]; !ok {
+		t.Fatal("expected active bucket to be retained during GC")
 	}
 }

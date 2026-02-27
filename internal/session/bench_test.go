@@ -10,16 +10,22 @@ func BenchmarkMemoryStore_AddUsage(b *testing.B) {
 	store := NewMemoryStore()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		store.AddUsage("token-hash-1", 100)
+		if _, err := store.AddUsage("token-hash-1", 100); err != nil {
+			b.Fatalf("add usage failed: %v", err)
+		}
 	}
 }
 
 func BenchmarkMemoryStore_GetUsage(b *testing.B) {
 	store := NewMemoryStore()
-	store.AddUsage("token-hash-1", 100)
+	if _, err := store.AddUsage("token-hash-1", 100); err != nil {
+		b.Fatalf("seed add usage failed: %v", err)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		store.GetUsage("token-hash-1")
+		if _, err := store.GetUsage("token-hash-1"); err != nil {
+			b.Fatalf("get usage failed: %v", err)
+		}
 	}
 }
 
@@ -34,7 +40,9 @@ func BenchmarkFileMemoryWriter_Append(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		w.Append("session-1", "user", "gpt-4o", "hello world")
+		if err := w.Append("session-1", "user", "gpt-4o", "hello world"); err != nil {
+			b.Fatalf("append failed: %v", err)
+		}
 	}
 }
 
@@ -48,7 +56,9 @@ func BenchmarkDirMemoryWriter_Append(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		w.Append("session-hash-1", "user", "gpt-4o", "hello world")
+		if err := w.Append("session-hash-1", "user", "gpt-4o", "hello world"); err != nil {
+			b.Fatalf("append failed: %v", err)
+		}
 	}
 }
 
@@ -62,7 +72,9 @@ func BenchmarkDirMemoryWriter_Append_MultipleSessions(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		w.Append(fmt.Sprintf("session-%d", i%10), "user", "gpt-4o", "hello world")
+		if err := w.Append(fmt.Sprintf("session-%d", i%10), "user", "gpt-4o", "hello world"); err != nil {
+			b.Fatalf("append failed: %v", err)
+		}
 	}
 }
 

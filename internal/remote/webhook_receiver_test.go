@@ -239,7 +239,9 @@ func TestWebhookReceiver_DefaultPath(t *testing.T) {
 func TestWebhookReceiver_RemoteSyncOnEvent(t *testing.T) {
 	// Set up a remote server with a token
 	remoteStore := newMemStore()
-	remoteStore.Create("hash-remote", `{"base_key_env":"OPENAI_API_KEY"}`, "")
+	if err := remoteStore.Create("hash-remote", `{"base_key_env":"OPENAI_API_KEY"}`, ""); err != nil {
+		t.Fatalf("seed remote store: %v", err)
+	}
 	srv := NewServer(remoteStore, "")
 	ts := httptest.NewServer(srv)
 	defer ts.Close()

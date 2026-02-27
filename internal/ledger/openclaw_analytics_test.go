@@ -60,9 +60,13 @@ func TestOpenClawAnalytics_ByMetadataKey(t *testing.T) {
 
 	// Write session to disk
 	sessDir := filepath.Join(dir, "sessions")
-	os.MkdirAll(sessDir, 0755)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
 	data, _ := json.Marshal(session)
-	os.WriteFile(filepath.Join(sessDir, "2026-02-27_test.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(sessDir, "2026-02-27_test.json"), data, 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
 
 	oca := NewOpenClawAnalytics(dir)
 
@@ -183,9 +187,13 @@ func TestOpenClawAnalytics_ByTeamAndChannel(t *testing.T) {
 	}
 
 	sessDir := filepath.Join(dir, "sessions")
-	os.MkdirAll(sessDir, 0755)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
 	data, _ := json.Marshal(session)
-	os.WriteFile(filepath.Join(sessDir, "2026-02-27_test.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(sessDir, "2026-02-27_test.json"), data, 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
 
 	oca := NewOpenClawAnalytics(dir)
 	metrics, err := oca.ByTeamAndChannel()
@@ -270,12 +278,18 @@ func TestOpenClawAnalytics_FilteredSessions(t *testing.T) {
 	}
 
 	sessDir := filepath.Join(dir, "sessions")
-	os.MkdirAll(sessDir, 0755)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
 
 	data1, _ := json.Marshal(session1)
 	data2, _ := json.Marshal(session2)
-	os.WriteFile(filepath.Join(sessDir, "2026-02-27_sess1.json"), data1, 0644)
-	os.WriteFile(filepath.Join(sessDir, "2026-02-27_sess2.json"), data2, 0644)
+	if err := os.WriteFile(filepath.Join(sessDir, "2026-02-27_sess1.json"), data1, 0o644); err != nil {
+		t.Fatalf("write sess1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "2026-02-27_sess2.json"), data2, 0o644); err != nil {
+		t.Fatalf("write sess2: %v", err)
+	}
 
 	oca := NewOpenClawAnalytics(dir)
 
@@ -360,9 +374,13 @@ func TestOpenClawAnalytics_ModelsUsed(t *testing.T) {
 	}
 
 	sessDir := filepath.Join(dir, "sessions")
-	os.MkdirAll(sessDir, 0755)
+	if err := os.MkdirAll(sessDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
 	data, _ := json.Marshal(session)
-	os.WriteFile(filepath.Join(sessDir, "2026-02-27_test.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(sessDir, "2026-02-27_test.json"), data, 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
 
 	oca := NewOpenClawAnalytics(dir)
 	metrics, err := oca.ByMetadataKey("team")

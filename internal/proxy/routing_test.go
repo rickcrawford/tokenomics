@@ -38,11 +38,13 @@ func TestHandler_MultiProviderRouting(t *testing.T) {
 		capturedPath = r.URL.Path
 		capturedHeaders = r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "test-response",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hello"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -59,7 +61,9 @@ func TestHandler_MultiProviderRouting(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_multi"), pol)
 
 	// Test 1: GPT model routes to openai with bearer auth
@@ -123,11 +127,13 @@ func TestHandler_MultiProviderPerModelBudget(t *testing.T) {
 
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-budget",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -149,7 +155,9 @@ func TestHandler_MultiProviderPerModelBudget(t *testing.T) {
 			},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_budget"), pol)
 
 	// Verify gpt-4o resolves to 50000 budget
@@ -179,11 +187,13 @@ func TestHandler_ProviderUpstreamURLOverride(t *testing.T) {
 	// Create the override upstream (the one the provider policy points to)
 	override := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-override",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "from override"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode override response: %v", err)
+		}
 	}))
 	defer override.Close()
 
@@ -202,7 +212,9 @@ func TestHandler_ProviderUpstreamURLOverride(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_provurl"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -231,11 +243,13 @@ func TestHandler_UnmatchedModelUsesGlobalPolicy(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-global",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -248,7 +262,9 @@ func TestHandler_UnmatchedModelUsesGlobalPolicy(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_global"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -275,13 +291,17 @@ func TestHandler_ProviderPromptInjection(t *testing.T) {
 
 	var capturedBody map[string]interface{}
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&capturedBody)
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			t.Fatalf("decode captured request body: %v", err)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-prompt",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -300,7 +320,9 @@ func TestHandler_ProviderPromptInjection(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_prompt"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions",
@@ -361,11 +383,13 @@ func TestHandler_QueryAuthRouting(t *testing.T) {
 		lastQueryKey = r.URL.Query().Get("key")
 		lastBearerAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "test-resp",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -381,7 +405,9 @@ func TestHandler_QueryAuthRouting(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_qauth"), pol)
 
 	// Gemini request uses query auth

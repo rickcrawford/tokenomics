@@ -1,13 +1,35 @@
 package store
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/rickcrawford/tokenomics/internal/events"
+
 	bolt "go.etcd.io/bbolt"
 )
+
+type capturingEmitter struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (c *capturingEmitter) Emit(_ context.Context, event events.Event) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, event)
+	return nil
+}
+
+func (c *capturingEmitter) Close() error { return nil }
 
 func validPolicyJSON() string {
 	return `{"base_key_env":"TEST_KEY"}`
@@ -185,7 +207,9 @@ func TestDelete(t *testing.T) {
 		{
 			name: "delete existing token succeeds",
 			setup: func(s *BoltStore) {
-				s.Create("to_delete", validPolicyJSON(), "")
+				if err := s.Create("to_delete", validPolicyJSON(), ""); err != nil {
+					t.Fatalf("setup create to_delete: %v", err)
+				}
 			},
 			deleteKey: "to_delete",
 			wantErr:   "",
@@ -364,11 +388,13 @@ func TestEncryption_DataIsEncrypted(t *testing.T) {
 
 	// Read raw data from bolt and verify it doesn't contain plaintext
 	var rawValue []byte
-	s.db.View(func(tx *bolt.Tx) error {
+	if err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(tokensBucket)
 		rawValue = append([]byte{}, b.Get([]byte(hash))...)
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("read raw bolt value: %v", err)
+	}
 
 	raw := string(rawValue)
 	if strings.Contains(raw, "TEST_KEY") {
@@ -509,6 +535,47 @@ func TestExpiration_ExpiredTokenReturnsNil(t *testing.T) {
 	}
 	if p != nil {
 		t.Error("expected nil policy for expired token")
+	}
+}
+
+func TestExpiration_ExpiredTokenEmitsOnceAndRemovesCacheEntry(t *testing.T) {
+	s := newTestStore(t)
+	em := &capturingEmitter{}
+	s.SetEmitter(em)
+
+	past := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	if err := s.Create("exp_emit_once", validPolicyJSON(), past); err != nil {
+		t.Fatalf("Create with past expiry: %v", err)
+	}
+
+	// First lookup should emit token.expired and remove from cache.
+	p, err := s.Lookup("exp_emit_once")
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if p != nil {
+		t.Fatal("expected nil policy for expired token")
+	}
+
+	// Second lookup should not emit again because cache entry is removed.
+	p, err = s.Lookup("exp_emit_once")
+	if err != nil {
+		t.Fatalf("Lookup second time: %v", err)
+	}
+	if p != nil {
+		t.Fatal("expected nil policy for expired token on second lookup")
+	}
+
+	em.mu.Lock()
+	defer em.mu.Unlock()
+	expiredEvents := 0
+	for _, evt := range em.events {
+		if evt.Type == events.TokenExpired {
+			expiredEvents++
+		}
+	}
+	if expiredEvents != 1 {
+		t.Fatalf("expected exactly one token.expired event, got %d", expiredEvents)
 	}
 }
 
@@ -782,4 +849,150 @@ func TestDeriveKey_DifferentSecrets(t *testing.T) {
 	if string(k1) == string(k2) {
 		t.Error("different secrets produced same key")
 	}
+}
+
+func TestClose_IdempotentWithFileWatcher(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "watch.db")
+	s := NewBoltStore(dbPath, "")
+	if err := s.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	s.StartFileWatch(1 * time.Millisecond)
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("first Close() error: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("second Close() error: %v", err)
+	}
+}
+
+func TestReload_SkipsCorruptRecord(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert corrupt raw JSON directly into Bolt bucket.
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(tokensBucket)
+		return b.Put([]byte("corrupt-key"), []byte("{not-json"))
+	}); err != nil {
+		t.Fatalf("insert corrupt record: %v", err)
+	}
+
+	if err := s.Reload(); err != nil {
+		t.Fatalf("Reload() should skip corrupt records, got error: %v", err)
+	}
+
+	// Corrupt entry should not appear in cache/List.
+	p, err := s.Lookup("corrupt-key")
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if p != nil {
+		t.Fatal("expected corrupt record to be skipped during reload")
+	}
+}
+
+func TestCreate_LargePolicy(t *testing.T) {
+	s := newTestStore(t)
+
+	large := strings.Repeat("x", 2*1024*1024) // 2 MB payload
+	policyJSON := `{"base_key_env":"TEST_KEY","prompts":[{"role":"system","content":"` + large + `"}]}`
+
+	if err := s.Create("large-policy-hash", policyJSON, ""); err != nil {
+		t.Fatalf("Create large policy: %v", err)
+	}
+
+	p, err := s.Lookup("large-policy-hash")
+	if err != nil {
+		t.Fatalf("Lookup large policy: %v", err)
+	}
+	if p == nil || len(p.Prompts) != 1 {
+		t.Fatal("expected large policy to be retrievable")
+	}
+}
+
+func TestInit_DBPathPermissionDenied(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission mode semantics differ on Windows")
+	}
+
+	parent := filepath.Join(t.TempDir(), "readonly")
+	if err := os.MkdirAll(parent, 0o555); err != nil {
+		t.Fatalf("mkdir readonly dir: %v", err)
+	}
+
+	dbPath := filepath.Join(parent, "denied.db")
+	s := NewBoltStore(dbPath, "")
+	err := s.Init()
+	if err == nil {
+		_ = s.Close()
+		t.Fatal("expected permission error when opening DB in readonly directory")
+	}
+}
+
+func TestConcurrentCreateAndLookup(t *testing.T) {
+	s := newTestStore(t)
+
+	const n = 50
+	var wg sync.WaitGroup
+
+	for i := 0; i < n; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			hash := fmt.Sprintf("concurrent-hash-%d", i)
+			_ = s.Create(hash, validPolicyJSON(), "")
+			_, _ = s.Lookup(hash)
+		}()
+	}
+	wg.Wait()
+
+	records, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) == 0 {
+		t.Fatal("expected at least one created record in concurrent test")
+	}
+}
+
+func TestFileWatch_ReloadsExternalChanges(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "watch-reload.db")
+	s1 := NewBoltStore(dbPath, "")
+	if err := s1.Init(); err != nil {
+		t.Fatalf("Init s1: %v", err)
+	}
+	defer s1.Close()
+	s1.StartFileWatch(10 * time.Millisecond)
+
+	// Write directly to BoltDB to bypass cache updates, then rely on file watcher reload.
+	rec := boltRecord{
+		PolicyJSON: validPolicyJSON(),
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal test record: %v", err)
+	}
+	if err := s1.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(tokensBucket)
+		return b.Put([]byte("watched-hash"), data)
+	}); err != nil {
+		t.Fatalf("direct bolt write: %v", err)
+	}
+
+	deadline := time.Now().Add(750 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		p, err := s1.Lookup("watched-hash")
+		if err != nil {
+			t.Fatalf("Lookup from s1: %v", err)
+		}
+		if p != nil {
+			return
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatal("expected file watcher to reload token created by external writer")
 }

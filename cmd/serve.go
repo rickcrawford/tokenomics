@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -38,71 +39,55 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 }
 
-// setupLogFile configures logging to write to a file (default: ~/.tokenomics/tokenomics.log)
-// Can be overridden with TOKENOMICS_LOG_FILE env var or disabled with TOKENOMICS_LOG_STDOUT=1
-func setupLogFile() error {
-	// Check if user wants to disable file logging and use stdout instead
-	if os.Getenv("TOKENOMICS_LOG_STDOUT") == "1" {
-		// Use default stdout
-		return nil
-	}
-
-	logFile := os.Getenv("TOKENOMICS_LOG_FILE")
-	if logFile == "" {
-		// Default to ~/.tokenomics/tokenomics.log
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("get home directory: %w", err)
-		}
-		logFile = filepath.Join(homeDir, ".tokenomics", "tokenomics.log")
-	}
-
-	// Create parent directory if needed
-	dir := filepath.Dir(logFile)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create log directory: %w", err)
-	}
-
-	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return fmt.Errorf("open log file: %w", err)
-	}
-
-	log.SetOutput(f)
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("Logging to %s", logFile)
-
-	return nil
-}
-
 func runServe(cmd *cobra.Command, args []string) error {
-	// Set up file logging
-	if err := setupLogFile(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not set up log file: %v\n", err)
-		// Continue anyway, logs will go to stdout
-	}
-
-
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// Apply --dir override if set
+	// Never write application logs to stdout/stderr.
+	// If file logging is disabled, discard logs entirely.
+	log.SetOutput(io.Discard)
+
+	// Apply --dir override if set (takes precedence over config file)
 	if dirOverride != "" {
 		cfg.Dir = dirOverride
+		// Make it absolute
 		if !filepath.IsAbs(cfg.Dir) {
 			if abs, err := filepath.Abs(cfg.Dir); err == nil {
 				cfg.Dir = abs
 			}
 		}
+	}
+
+	// Set default db path if not already set
+	if cfg.Storage.DBPath == "" {
 		cfg.Storage.DBPath = filepath.Join(cfg.Dir, "tokenomics.db")
-		if cfg.Ledger.Dir == "" || cfg.Ledger.Dir == cfg.Dir {
-			cfg.Ledger.Dir = cfg.Dir
+	}
+
+	// Ensure the main directory exists
+	if err := config.EnsureDir(cfg.Dir); err != nil {
+		return fmt.Errorf("ensure directory: %w", err)
+	}
+
+	// Set up file logging if enabled
+	if cfg.Logging.File.Enabled {
+		logPath := cfg.Logging.File.Path
+		if logPath == "" {
+			logPath = filepath.Join(cfg.Dir, "tokenomics.log")
 		}
-		if err := config.EnsureDir(cfg.Dir); err != nil {
-			return fmt.Errorf("ensure directory: %w", err)
+		// Create parent directory if needed
+		logDir := filepath.Dir(logPath)
+		if err := os.MkdirAll(logDir, 0o700); err != nil {
+			return fmt.Errorf("create log directory: %w", err)
 		}
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return fmt.Errorf("open log file: %w", err)
+		}
+		log.SetOutput(f)
+		log.SetFlags(log.LstdFlags | log.Lshortfile)
+		log.Printf("Logging to %s (level: %s)", logPath, cfg.Logging.File.Level)
 	}
 
 	dbFile := cfg.Storage.DBPath
@@ -185,7 +170,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Init session ledger (if enabled)
 	var sessionLedger *ledger.Ledger
 	if cfg.Ledger.Enabled {
-		l, err := ledger.Open(cfg.Ledger.Dir, cfg.Ledger.Memory)
+		l, err := ledger.Open(cfg.Dir, cfg.Ledger.Memory)
 		if err != nil {
 			log.Printf("Warning: could not open ledger: %v (continuing without ledger)", err)
 		} else {
@@ -198,7 +183,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 					log.Printf("Ledger closed successfully for session %s", l.SessionID())
 				}
 			}()
-			log.Printf("Session ledger enabled (dir=%s, session=%s)", cfg.Ledger.Dir, l.SessionID())
+			log.Printf("Session ledger enabled (dir=%s, session=%s)", cfg.Dir, l.SessionID())
 		}
 	}
 
@@ -235,19 +220,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(middleware.Heartbeat("/ping"))
 
-	// Add response compression (brotli preferred, fallback to gzip)
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			cw := proxy.NewCompressionWriter(w, r)
-			defer cw.Close()
-			next.ServeHTTP(cw, r)
-		})
-	})
-
 	// Management endpoints (no auth required)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok"}`))
+		if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+			log.Printf("health write error: %v", err)
+		}
 	})
 	r.Get("/stats", handler.Stats().StatsHandler)
 
@@ -283,7 +261,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 			<-ctx.Done()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			httpServer.Shutdown(shutdownCtx)
+			if err := httpServer.Shutdown(shutdownCtx); err != nil {
+				log.Printf("http shutdown error: %v", err)
+			}
 		}()
 	}
 
@@ -335,17 +315,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 			<-ctx.Done()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			httpsServer.Shutdown(shutdownCtx)
+			if err := httpsServer.Shutdown(shutdownCtx); err != nil {
+				log.Printf("https shutdown error: %v", err)
+			}
 		}()
 	}
 
 	// Emit server.start event (the "on load" event for key sync and readiness)
-	emitter.Emit(context.Background(), events.New(events.ServerStart, map[string]interface{}{
+	if err := emitter.Emit(context.Background(), events.New(events.ServerStart, map[string]interface{}{
 		"http_port":  cfg.Server.HTTPPort,
 		"https_port": cfg.Server.HTTPSPort,
 		"tls":        cfg.Server.TLS.Enabled,
 		"upstream":   cfg.Server.UpstreamURL,
-	}))
+	})); err != nil {
+		log.Printf("server.start emit failed: %v", err)
+	}
 
 	log.Println("Tokenomics proxy started. Press Ctrl+C to stop.")
 

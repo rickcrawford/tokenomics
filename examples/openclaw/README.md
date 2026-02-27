@@ -1,6 +1,6 @@
 # OpenClaw + Tokenomics Integration Examples
 
-This directory contains production-ready examples for integrating OpenClaw with Tokenomics.
+This directory contains example configurations for integrating OpenClaw with Tokenomics.
 
 ## What's Included
 
@@ -22,7 +22,6 @@ This directory contains production-ready examples for integrating OpenClaw with 
 - **.env.example** - Environment variables template
 - **docker-compose.yml** - Full stack: tokenomics + webhook collector + monitoring
 - **integration-test.sh** - Automated integration test script
-- **webhook-config.yaml** - Webhook receiver configuration
 
 ## Quick Start
 
@@ -52,7 +51,7 @@ Verify tokenomics is running:
 
 ```bash
 curl http://localhost:8080/health
-# Expected: {"status":"ready"}
+# Expected: {"status":"ok"}
 ```
 
 ### 3. Create Tokens for Each Agent
@@ -63,10 +62,12 @@ Create a Slack bot token:
 ../../bin/tokenomics token create \
   --policy @policies/slack-bot.json \
   --expires 1y
-# Output: Token hash 9f86d08187f...
+# Output includes:
+#   - Token: tkn_...
+#   - Hash:  <sha256 hash>
 ```
 
-Store the hash for use in OpenClaw config.
+Store the raw token (`tkn_...`) for use in OpenClaw config.
 
 Create a Discord bot token:
 
@@ -85,7 +86,7 @@ Edit `agents/slack-config.json`:
 {
   "llm": {
     "api_url": "http://localhost:8080",
-    "api_key": "9f86d08187f..."  // Token hash from step 3
+    "api_key": "tkn_..."  // Raw token from step 3
   }
 }
 ```
@@ -119,7 +120,7 @@ This will:
 ┌─────────────────────────────────────────────────────────┐
 │   Tokenomics Reverse Proxy (tokenomics-config.yaml)    │
 │                                                         │
-│  1. Validate token hash                                │
+│  1. Validate wrapper token                             │
 │  2. Apply policy rules                                 │
 │     - Check budget (daily/monthly)                     │
 │     - Apply PII masking                                │
@@ -143,7 +144,7 @@ This will:
                                    │ Receives events:    │
                                    │ - budget.alert      │
                                    │ - security.pii      │
-                                   │ - rate.limit.hit    │
+                                   │ - rate.exceeded     │
                                    └─────────────────────┘
 ```
 
@@ -156,7 +157,6 @@ examples/openclaw/
 ├── tokenomics-config.yaml             # Tokenomics server config
 ├── docker-compose.yml                 # Full stack setup
 ├── integration-test.sh                # Automated tests
-├── webhook-config.yaml                # Webhook receiver setup
 │
 ├── policies/                          # Token policies
 │   ├── slack-bot.json                # Slack agent policy
@@ -230,7 +230,7 @@ curl http://localhost:8080/health
 # Check firewall (if using remote tokenomics)
 curl -v https://tokenomics.example.com/health
 
-# Verify token hash in OpenClaw config
+# Verify token record by hash (from `token create` output)
 ../../bin/tokenomics token get --hash <token-hash>
 ```
 
@@ -253,8 +253,8 @@ cat policies/slack-bot.json | grep -A10 "rate_limit"
 # Verify token is using correct policy
 ../../bin/tokenomics token get --hash <token-hash> | grep -A20 "\"policy\""
 
-# Check session usage
-cat ~/.tokenomics/sessions/<token-hash>.json
+# Check session usage files
+ls ~/.tokenomics/sessions/
 ```
 
 ## Production Deployment
@@ -268,7 +268,7 @@ For production:
 5. **Enable high-availability** - Run multiple tokenomics instances with shared Redis backend
 6. **Backup ledger data** - `.tokenomics/tokenomics.db` contains all token data
 
-See `docs/DEPLOYMENT.md` for production hardening guide.
+See `docs/CONFIGURATION.md`, `docs/POLICIES.md`, and `docs/EVENTS.md` for production settings.
 
 ## Examples by Use Case
 

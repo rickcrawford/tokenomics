@@ -173,5 +173,7 @@ func (u *UsageStats) StatsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	enc.Encode(resp)
+	if err := enc.Encode(resp); err != nil {
+		http.Error(w, `{"error":"encode stats response"}`, http.StatusInternalServerError)
+	}
 }

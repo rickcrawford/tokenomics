@@ -27,7 +27,9 @@ func TestStatusForCount(t *testing.T) {
 func TestFileExists(t *testing.T) {
 	dir := t.TempDir()
 	existing := filepath.Join(dir, "exists.txt")
-	os.WriteFile(existing, []byte("hello"), 0o644)
+	if err := os.WriteFile(existing, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write existing file: %v", err)
+	}
 
 	if !fileExists(existing) {
 		t.Error("expected true for existing file")

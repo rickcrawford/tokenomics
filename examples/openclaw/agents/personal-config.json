@@ -10,7 +10,7 @@
   "llm": {
     "type": "openai-compatible",
     "api_url": "https://tokenomics.example.com",
-    "api_key": "{{TOKEN_HASH_FROM_TOKEN_CREATE}}",
+    "api_key": "{{TOKEN_FROM_TOKEN_CREATE}}",
     "model": "gpt-4-turbo",
     "temperature": 0.7,
     "max_tokens": 2000,

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -112,6 +113,11 @@ func shouldCompress(r *http.Request, acceptEncoding string) bool {
 		return false
 	}
 
+	// Don't compress streaming responses (chunked, Server-Sent Events, etc)
+	if strings.Contains(strings.ToLower(r.Header.Get("Transfer-Encoding")), "chunked") {
+		return false
+	}
+
 	return true
 }
 
@@ -123,4 +129,50 @@ func wrapWithCompression(handler http.Handler) http.Handler {
 		defer cw.Close()
 		handler.ServeHTTP(cw, r)
 	})
+}
+
+// CompressRequestBody compresses a request body using brotli (preferred) or gzip.
+// Returns the compressed body, encoding used ("br" or "gzip"), and any error.
+// If compression is not beneficial or fails, returns the original body with empty encoding.
+// Minimum size threshold: 1 KB (don't compress very small bodies).
+func CompressRequestBody(body []byte) ([]byte, string, error) {
+	// Don't compress very small bodies (less than 1 KB)
+	if len(body) < 1024 {
+		return body, "", nil
+	}
+
+	// Try brotli compression first (better compression ratio)
+	brBuffer := bytes.NewBuffer(make([]byte, 0, len(body)))
+	brWriter := brotli.NewWriterLevel(brBuffer, brotli.DefaultCompression)
+	_, err := brWriter.Write(body)
+	if err == nil {
+		err = brWriter.Close()
+		if err == nil {
+			brCompressed := brBuffer.Bytes()
+			// Only use brotli if it actually reduces size
+			if len(brCompressed) < len(body) {
+				return brCompressed, "br", nil
+			}
+		}
+	}
+
+	// Fall back to gzip compression
+	gzBuffer := bytes.NewBuffer(make([]byte, 0, len(body)))
+	gzWriter, err := gzip.NewWriterLevel(gzBuffer, gzip.DefaultCompression)
+	if err == nil {
+		_, err := gzWriter.Write(body)
+		if err == nil {
+			err = gzWriter.Close()
+			if err == nil {
+				gzCompressed := gzBuffer.Bytes()
+				// Only use gzip if it actually reduces size
+				if len(gzCompressed) < len(body) {
+					return gzCompressed, "gzip", nil
+				}
+			}
+		}
+	}
+
+	// No compression beneficial or available
+	return body, "", nil
 }

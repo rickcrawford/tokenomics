@@ -247,7 +247,7 @@ export TOKENOMICS_HASH_KEY=my-secret-hash-key
 eval $(./bin/tokenomics init --token tkn_<your-token> --port 8443 --insecure)
 
 # Make a request through the proxy
-curl -s $OPENAI_BASE_URL/v1/chat/completions \
+curl -s $OPENAI_BASE_URL/chat/completions \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{

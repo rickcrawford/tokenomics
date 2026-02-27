@@ -13,12 +13,14 @@ import (
 type RateLimiter struct {
 	mu      sync.Mutex
 	buckets map[string]*tokenBucket
+	lastGC  time.Time
 }
 
 type tokenBucket struct {
 	windows     []*windowCounter
 	parallel    atomic.Int64
 	maxParallel int
+	lastSeen    time.Time
 }
 
 type windowCounter struct {
@@ -66,14 +68,18 @@ func parseWindow(w string) time.Duration {
 func (rl *RateLimiter) getBucket(tokenHash string, cfg *policy.RateLimitConfig) *tokenBucket {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+	now := time.Now()
+	rl.gcStaleBucketsLocked(now)
 
 	b, ok := rl.buckets[tokenHash]
 	if ok {
+		b.lastSeen = now
 		return b
 	}
 
 	b = &tokenBucket{
 		maxParallel: cfg.MaxParallel,
+		lastSeen:    now,
 	}
 
 	for _, rule := range cfg.Rules {
@@ -85,6 +91,24 @@ func (rl *RateLimiter) getBucket(tokenHash string, cfg *policy.RateLimitConfig) 
 
 	rl.buckets[tokenHash] = b
 	return b
+}
+
+func (rl *RateLimiter) gcStaleBucketsLocked(now time.Time) {
+	// Keep cleanup cheap by running at most once per minute.
+	if !rl.lastGC.IsZero() && now.Sub(rl.lastGC) < time.Minute {
+		return
+	}
+	rl.lastGC = now
+
+	const staleAfter = 24 * time.Hour
+	for tokenHash, bucket := range rl.buckets {
+		if bucket.parallel.Load() > 0 {
+			continue
+		}
+		if !bucket.lastSeen.IsZero() && now.Sub(bucket.lastSeen) > staleAfter {
+			delete(rl.buckets, tokenHash)
+		}
+	}
 }
 
 // Allow checks if a request is allowed under the rate limit.

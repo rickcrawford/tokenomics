@@ -96,7 +96,9 @@ func TestOutputDotenv_MergesExisting(t *testing.T) {
 	path := filepath.Join(dir, ".env")
 
 	// Write initial content
-	os.WriteFile(path, []byte("KEY1=\"old\"\nOTHER=\"keep\"\n"), 0o644)
+	if err := os.WriteFile(path, []byte("KEY1=\"old\"\nOTHER=\"keep\"\n"), 0o644); err != nil {
+		t.Fatalf("write initial dotenv: %v", err)
+	}
 
 	pairs := []EnvPair{
 		{"KEY1", "new"},
@@ -125,8 +127,14 @@ func TestOutputDotenv_DefaultPath(t *testing.T) {
 	// Change to temp dir so default ".env" doesn't pollute the repo
 	orig, _ := os.Getwd()
 	dir := t.TempDir()
-	os.Chdir(dir)
-	defer os.Chdir(orig)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
 
 	pairs := []EnvPair{{"TEST_KEY", "test_val"}}
 	if err := OutputDotenv(pairs, ""); err != nil {

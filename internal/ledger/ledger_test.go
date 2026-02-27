@@ -410,13 +410,19 @@ func TestReadSessionFilesSkipsCorrupted(t *testing.T) {
 		ByToken:   make(map[string]*TokenRollup),
 	}
 	data, _ := json.Marshal(valid)
-	os.WriteFile(filepath.Join(sessDir, "2026-02-25_valid123.json"), data, 0o644)
+	if err := os.WriteFile(filepath.Join(sessDir, "2026-02-25_valid123.json"), data, 0o644); err != nil {
+		t.Fatalf("write valid session: %v", err)
+	}
 
 	// Write a corrupted file
-	os.WriteFile(filepath.Join(sessDir, "2026-02-25_corrupt.json"), []byte("{invalid json"), 0o644)
+	if err := os.WriteFile(filepath.Join(sessDir, "2026-02-25_corrupt.json"), []byte("{invalid json"), 0o644); err != nil {
+		t.Fatalf("write corrupted session: %v", err)
+	}
 
 	// Write a non-JSON file (should be skipped)
-	os.WriteFile(filepath.Join(sessDir, "notes.txt"), []byte("not a session"), 0o644)
+	if err := os.WriteFile(filepath.Join(sessDir, "notes.txt"), []byte("not a session"), 0o644); err != nil {
+		t.Fatalf("write non-json file: %v", err)
+	}
 
 	sessions, err := ReadSessionFiles(dir)
 	if err != nil {

@@ -184,8 +184,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// Cleanup function to ensure local proxy is shut down (no-op if using remote)
 	defer func() {
 		if serveCmd != nil && serveCmd.Process != nil {
-			interruptProcess(serveCmd.Process)
-			serveCmd.Wait()
+			if err := interruptProcess(serveCmd.Process); err != nil {
+				fmt.Fprintf(os.Stderr, "proxy interrupt error: %v\n", err)
+			}
+			if err := serveCmd.Wait(); err != nil {
+				fmt.Fprintf(os.Stderr, "proxy shutdown wait error: %v\n", err)
+			}
 		}
 	}()
 

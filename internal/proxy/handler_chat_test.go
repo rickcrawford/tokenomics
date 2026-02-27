@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/rickcrawford/tokenomics/internal/policy"
 	"github.com/rickcrawford/tokenomics/internal/session"
+	"github.com/rickcrawford/tokenomics/internal/tokencount"
 )
 
 func TestShouldRetry(t *testing.T) {
@@ -247,16 +251,20 @@ func TestHandler_XApiKeyAuth(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-xapi",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hi"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "XAPI_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_xapi"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
@@ -279,16 +287,20 @@ func TestHandler_RawAuthToken(t *testing.T) {
 
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-raw",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hi"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "RAW_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_raw"), pol)
 
 	// Send Authorization header without Bearer prefix
@@ -313,7 +325,9 @@ func TestHandler_InvalidBody(t *testing.T) {
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "BODY_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_body"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{not valid json}`))
@@ -336,7 +350,9 @@ func TestHandler_MissingAPIKey(t *testing.T) {
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "NONEXISTENT_KEY_12345"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_nokey"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
@@ -360,7 +376,9 @@ func TestHandler_StreamingResponse(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		// Verify the proxy sent the stream request
 		var body map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
 		if body["stream"] != true {
 			t.Error("expected stream=true in upstream request")
 		}
@@ -386,7 +404,9 @@ func TestHandler_StreamingResponse(t *testing.T) {
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "STREAM_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_stream"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -409,16 +429,155 @@ func TestHandler_StreamingResponse(t *testing.T) {
 	}
 }
 
+func TestHandler_RetryThenFallbackModel(t *testing.T) {
+	t.Setenv("FALLBACK_KEY", "sk-fallback-test")
+
+	var primaryCalls int
+	var fallbackCalls int
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		model, _ := body["model"].(string)
+
+		if model == "gpt-4o" {
+			primaryCalls++
+			w.WriteHeader(http.StatusTooManyRequests)
+			if _, err := w.Write([]byte(`{"error":{"message":"rate limited"}}`)); err != nil {
+				t.Fatalf("write rate-limit response: %v", err)
+			}
+			return
+		}
+
+		if model == "gpt-4o-mini" {
+			fallbackCalls++
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":      "chatcmpl-fallback",
+				"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "fallback ok"}}},
+				"usage":   map[string]interface{}{"completion_tokens": 1},
+			}); err != nil {
+				t.Fatalf("encode fallback response: %v", err)
+			}
+			return
+		}
+
+		w.WriteHeader(http.StatusBadRequest)
+	})
+	defer upstream.Close()
+
+	pol := &policy.Policy{
+		BaseKeyEnv: "FALLBACK_KEY",
+		Retry: &policy.RetryConfig{
+			MaxRetries: 1,
+			Fallbacks:  []string{"gpt-4o-mini"},
+			RetryOn:    []int{429},
+		},
+	}
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
+	ts.Save(hashForTest(handler, "tkn_fallback"), pol)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
+		`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`,
+	))
+	req.Header.Set("Authorization", "Bearer tkn_fallback")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if primaryCalls != 2 {
+		t.Fatalf("expected 2 primary attempts (initial + retry), got %d", primaryCalls)
+	}
+	if fallbackCalls != 1 {
+		t.Fatalf("expected 1 fallback attempt, got %d", fallbackCalls)
+	}
+	if !strings.Contains(rr.Body.String(), "fallback ok") {
+		t.Fatalf("expected fallback response body, got %s", rr.Body.String())
+	}
+}
+
+func TestHandler_BudgetReservationConcurrent(t *testing.T) {
+	t.Setenv("BUDGET_KEY", "sk-budget-test")
+
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":      "chatcmpl-budget",
+			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
+			"usage":   map[string]interface{}{"completion_tokens": 1},
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
+	})
+	defer upstream.Close()
+
+	messages := []map[string]interface{}{
+		{"role": "user", "content": "hello"},
+	}
+	inputTokens, err := tokencount.CountMessages("gpt-4o", messages)
+	if err != nil {
+		t.Fatalf("token count failed: %v", err)
+	}
+
+	pol := &policy.Policy{
+		BaseKeyEnv: "BUDGET_KEY",
+		MaxTokens:  int64(inputTokens),
+	}
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
+	ts.Save(hashForTest(handler, "tkn_budget"), pol)
+
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}`
+	var wg sync.WaitGroup
+	statuses := make([]int, 2)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer tkn_budget")
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			statuses[idx] = rr.Code
+		}(i)
+	}
+	wg.Wait()
+
+	successes := 0
+	rejections := 0
+	for _, code := range statuses {
+		if code == http.StatusOK {
+			successes++
+		}
+		if code == http.StatusTooManyRequests {
+			rejections++
+		}
+	}
+	if successes != 1 || rejections != 1 {
+		t.Fatalf("expected one success and one budget rejection, got statuses=%v", statuses)
+	}
+}
+
 func TestHandler_WarnRuleAllows(t *testing.T) {
 	t.Setenv("WARN_KEY", "sk-warn-test")
 
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-warn",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -428,7 +587,9 @@ func TestHandler_WarnRuleAllows(t *testing.T) {
 			{Type: "keyword", Keywords: []string{"password"}, Action: "warn"},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_warn"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -453,12 +614,16 @@ func TestHandler_PassthroughBearerAuth(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[]}`))
+		if _, err := w.Write([]byte(`{"data":[]}`)); err != nil {
+			t.Fatalf("write passthrough response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "PT_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_pt"), pol)
 
 	req := httptest.NewRequest("GET", "/v1/models", nil)
@@ -486,11 +651,13 @@ func TestHandler_UpstreamURLOverride(t *testing.T) {
 	// Create a separate upstream for the policy override
 	override := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-override",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "from override"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode override response: %v", err)
+		}
 	}))
 	defer override.Close()
 
@@ -498,7 +665,9 @@ func TestHandler_UpstreamURLOverride(t *testing.T) {
 		BaseKeyEnv:  "OVERRIDE_KEY",
 		UpstreamURL: override.URL,
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_override"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -520,11 +689,13 @@ func TestHandler_PolicyWithMetadata(t *testing.T) {
 
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-meta",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -532,7 +703,9 @@ func TestHandler_PolicyWithMetadata(t *testing.T) {
 		BaseKeyEnv: "META_KEY",
 		Metadata:   map[string]string{"team": "engineering", "project": "test"},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_meta"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -556,16 +729,20 @@ func TestHandler_XApiKeyHeaderCleaned(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		upstreamHeaders = r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-clean",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "XAPI_CLEAN_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_clean"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -601,16 +778,20 @@ func TestHandler_AuthorizationHeaderCleaned(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		upstreamHeaders = r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-authclean",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "AUTH_CLEAN_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_authclean"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -717,7 +898,17 @@ func TestFormatResponseForMemory(t *testing.T) {
 			body: "not valid json",
 			contentType: "text/plain",
 			wantContent: true,
-			wantContains: "Non-JSON response",
+			wantContains: "not valid json",
+		},
+		{
+			name: "JSON without assistant content",
+			body: `{
+				"id": "resp_123",
+				"usage": {"completion_tokens": 3}
+			}`,
+			contentType: "application/json",
+			wantContent: true,
+			wantContains: `"id": "resp_123"`,
 		},
 		{
 			name: "JSON with delta (streaming)",
@@ -746,5 +937,151 @@ func TestFormatResponseForMemory(t *testing.T) {
 				t.Errorf("formatResponseForMemory result doesn't contain %q, got: %s", tt.wantContains, result)
 			}
 		})
+	}
+}
+
+func TestFormatResponseForMemory_NonJSONBinaryRaw(t *testing.T) {
+	body := []byte{0x00, 0xff, 0x01, 'A'}
+	got := formatResponseForMemory(body, "application/octet-stream")
+	if got == "" {
+		t.Fatal("expected non-empty output")
+	}
+	if strings.Contains(got, "Non-JSON response") {
+		t.Fatalf("expected raw output, got summary %q", got)
+	}
+}
+
+func TestHandler_StreamingMemoryDoesNotStoreRawSSE(t *testing.T) {
+	t.Setenv("STREAM_MEM_KEY", "sk-stream-mem-test")
+	memDir := t.TempDir()
+
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		lines := []string{
+			"data: {\"id\":\"chatcmpl-stream\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n",
+			"\n",
+			"data: {\"id\":\"chatcmpl-stream\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n",
+			"\n",
+			"data: {\"id\":\"chatcmpl-stream\",\"choices\":[{\"delta\":{\"content\":\" world\"}}],\"usage\":{\"completion_tokens\":2}}\n",
+			"\n",
+			"data: [DONE]\n",
+			"\n",
+		}
+		for _, line := range lines {
+			fmt.Fprint(w, line)
+		}
+	})
+	defer upstream.Close()
+
+	token := "tkn_stream_mem"
+	tokenHash := hashForTest(handler, token)
+	pol := &policy.Policy{
+		BaseKeyEnv: "STREAM_MEM_KEY",
+		Memory: policy.MemoryConfig{
+			Enabled:  true,
+			FilePath: memDir,
+			FileName: "{token_hash}.md",
+		},
+	}
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
+	ts.Save(tokenHash, pol)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
+		`{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+	))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	memoryPath := filepath.Join(memDir, tokenHash[:16]+".md")
+	data, err := os.ReadFile(memoryPath)
+	if err != nil {
+		t.Fatalf("failed to read memory file: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "Hello world") {
+		t.Fatalf("expected assistant text in memory, got: %s", content)
+	}
+	if strings.Contains(content, "data: {") || strings.Contains(content, "data: [DONE]") {
+		t.Fatalf("expected no raw SSE frames in memory, got: %s", content)
+	}
+}
+
+func TestHandler_StreamingResponseLongSSELine(t *testing.T) {
+	t.Setenv("STREAM_LONG_KEY", "sk-stream-long")
+	memDir := t.TempDir()
+
+	longContent := strings.Repeat("a", 100000)
+	payload, err := json.Marshal(map[string]interface{}{
+		"id": "chatcmpl-long",
+		"choices": []interface{}{
+			map[string]interface{}{
+				"delta": map[string]interface{}{
+					"content": longContent,
+				},
+			},
+		},
+		"usage": map[string]interface{}{
+			"completion_tokens": 3,
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal payload: %v", err)
+	}
+
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "data: %s\n\n", string(payload))
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	})
+	defer upstream.Close()
+
+	token := "tkn_stream_long"
+	tokenHash := hashForTest(handler, token)
+	pol := &policy.Policy{
+		BaseKeyEnv: "STREAM_LONG_KEY",
+		Memory: policy.MemoryConfig{
+			Enabled:  true,
+			FilePath: memDir,
+			FileName: "{token_hash}.md",
+		},
+	}
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
+	ts.Save(tokenHash, pol)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
+		`{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+	))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(memDir, tokenHash[:16]+".md"))
+	if err != nil {
+		t.Fatalf("failed to read memory file: %v", err)
+	}
+	if !strings.Contains(string(data), "assistant") {
+		t.Fatalf("expected assistant entry in memory file")
+	}
+	if strings.Contains(string(data), "data: {") {
+		t.Fatalf("expected no raw SSE JSON frames in memory file")
 	}
 }

@@ -1,6 +1,8 @@
 package session
 
 import (
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +83,37 @@ func TestFileMemoryWriter_AppendsToExisting(t *testing.T) {
 	}
 	if !strings.Contains(content, "New entry") {
 		t.Error("expected to contain appended entry")
+	}
+}
+
+func TestFileMemoryWriter_SanitizesBinaryContent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sanitized.md")
+
+	w, err := NewFileMemoryWriter(path)
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	// Includes NUL, invalid UTF-8 byte, and ESC control byte.
+	raw := string([]byte{'h', 'i', 0x00, 0xff, 'x', '\n', 0x1b, '!'})
+	if err := w.Append("sess-1234567890abcdef", "assistant", "gpt-4", raw); err != nil {
+		t.Fatalf("failed to append: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if strings.ContainsRune(string(data), '\x00') {
+		t.Error("expected NUL bytes to be removed from memory output")
+	}
+	if strings.ContainsRune(string(data), '\x1b') {
+		t.Error("expected control bytes to be removed from memory output")
+	}
+	if !strings.Contains(string(data), "hi ?x\n !") {
+		t.Errorf("expected sanitized readable content, got: %q", string(data))
 	}
 }
 
@@ -361,5 +394,246 @@ func TestDirMemoryWriter_CloseReleasesHandles(t *testing.T) {
 	// All handles should be released
 	if len(w.files) != 0 {
 		t.Errorf("expected 0 open files after close, got %d", len(w.files))
+	}
+}
+
+// TestRotatingDirMemoryWriter_NoRotationWhenUnlimited tests unlimited size
+func TestRotatingDirMemoryWriter_NoRotationWhenUnlimited(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create rotating writer with unlimited size (maxSizeMB = -1 means unlimited)
+	w, err := NewRotatingDirMemoryWriter(dir, "{token_hash}.md", -1, false)
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	// Write multiple large entries
+	sessionID := "aaaa1111bbbb2222cccc3333"
+	for i := 0; i < 5; i++ {
+		content := strings.Repeat("x", 10000) // 10KB per entry
+		if err := w.Append(sessionID, "user", "gpt-4", content); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Should still be a single file (no rotation)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(files) != 1 {
+		t.Errorf("expected 1 file (no rotation), got %d", len(files))
+	}
+}
+
+// TestRotatingDirMemoryWriter_RotatesOnSizeLimit tests file rotation
+func TestRotatingDirMemoryWriter_RotatesOnSizeLimit(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create rotating writer with 50 KB max size, no compression
+	w, err := NewRotatingDirMemoryWriter(dir, "{token_hash}.md", 0, false)
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	// Override maxSizeBytes to 50KB for testing
+	w.maxSizeBytes = 50 * 1024
+
+	sessionID := "aaaa1111bbbb2222cccc3333"
+
+	// Write entries totaling ~120 KB (should trigger rotation)
+	for i := 0; i < 4; i++ {
+		content := strings.Repeat("x", 35000) // 35KB per entry
+		if err := w.Append(sessionID, "user", "gpt-4", content); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Should have multiple files (original + rotated)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(files) < 2 {
+		t.Errorf("expected at least 2 files after rotation, got %d", len(files))
+	}
+
+	// Check that active file exists
+	currentPath := w.ResolvePath(sessionID)
+	if _, err := os.Stat(currentPath); os.IsNotExist(err) {
+		t.Errorf("current file should exist: %s", currentPath)
+	}
+}
+
+// TestRotatingDirMemoryWriter_CompressesRotatedFiles tests gzip compression
+func TestRotatingDirMemoryWriter_CompressesRotatedFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create rotating writer with compression enabled
+	w, err := NewRotatingDirMemoryWriter(dir, "{token_hash}.md", 0, true)
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	// Override maxSizeBytes to 30KB for testing
+	w.maxSizeBytes = 30 * 1024
+
+	sessionID := "aaaa1111bbbb2222cccc3333"
+
+	// Write enough to trigger rotation
+	for i := 0; i < 3; i++ {
+		content := strings.Repeat("test content ", 5000) // Highly compressible
+		if err := w.Append(sessionID, "user", "gpt-4", content); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Look for .gz files (compressed archives)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+
+	hasGzFile := false
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".gz") {
+			hasGzFile = true
+			// Verify it's a valid gzip file
+			path := filepath.Join(dir, f.Name())
+			gzFile, err := os.Open(path)
+			if err != nil {
+				t.Fatalf("open gz file: %v", err)
+			}
+			defer gzFile.Close()
+
+			gz, err := gzip.NewReader(gzFile)
+			if err != nil {
+				t.Fatalf("open gzip reader: %v", err)
+			}
+			defer gz.Close()
+
+			// Try to read decompressed content
+			data, err := io.ReadAll(gz)
+			if err != nil {
+				t.Fatalf("read gzip: %v", err)
+			}
+			if len(data) == 0 {
+				t.Errorf("compressed file is empty")
+			}
+		}
+	}
+
+	if !hasGzFile {
+		t.Error("expected at least one .gz file after compression")
+	}
+}
+
+// TestRotatingDirMemoryWriter_DisableCompression tests no compression
+func TestRotatingDirMemoryWriter_DisableCompression(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create rotating writer with compression disabled
+	w, err := NewRotatingDirMemoryWriter(dir, "{token_hash}.md", 0, false)
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	// Override maxSizeBytes to 30KB for testing
+	w.maxSizeBytes = 30 * 1024
+
+	sessionID := "aaaa1111bbbb2222cccc3333"
+
+	// Write enough to trigger rotation
+	for i := 0; i < 3; i++ {
+		content := strings.Repeat("test content ", 5000)
+		if err := w.Append(sessionID, "user", "gpt-4", content); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Should have .md files but no .gz files
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+
+	hasGzFile := false
+	for _, f := range files {
+		if strings.HasSuffix(f.Name(), ".gz") {
+			hasGzFile = true
+		}
+	}
+
+	if hasGzFile {
+		t.Error("expected no .gz files when compression disabled")
+	}
+}
+
+// TestRotatingDirMemoryWriter_DefaultSizeLimitApplied tests 100MB default
+func TestRotatingDirMemoryWriter_DefaultSizeLimitApplied(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create rotating writer with maxSizeMB = 0 (use default 100 MB)
+	w, err := NewRotatingDirMemoryWriter(dir, "{token_hash}.md", 0, false)
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+
+	// Should have 100 MB default
+	expectedDefault := int64(100 * 1024 * 1024)
+	if w.maxSizeBytes != expectedDefault {
+		t.Errorf("expected default 100 MB (%d bytes), got %d", expectedDefault, w.maxSizeBytes)
+	}
+
+	w.Close()
+}
+
+// TestRotatingDirMemoryWriter_ConcurrentSessions tests concurrent writes
+func TestRotatingDirMemoryWriter_ConcurrentSessions(t *testing.T) {
+	dir := t.TempDir()
+
+	w, err := NewRotatingDirMemoryWriter(dir, "{token_hash}.md", 0, false)
+	if err != nil {
+		t.Fatalf("failed to create writer: %v", err)
+	}
+	defer w.Close()
+
+	done := make(chan error, 20)
+	sessions := []string{
+		"aaaa1111bbbb2222cccc3333",
+		"dddd4444eeee5555ffff6666",
+	}
+
+	for _, s := range sessions {
+		for i := 0; i < 10; i++ {
+			s := s
+			go func() {
+				done <- w.Append(s, "user", "gpt-4", "concurrent message")
+			}()
+		}
+	}
+
+	for i := 0; i < 20; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("concurrent append failed: %v", err)
+		}
+	}
+
+	// Verify data integrity
+	for _, s := range sessions {
+		prefix := safeSessionPrefix(s, 16)
+		path := filepath.Join(dir, prefix+".md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read file for %s: %v", prefix, err)
+		}
+		count := strings.Count(string(data), "concurrent message")
+		if count != 10 {
+			t.Errorf("session %s: expected 10 messages, found %d", prefix, count)
+		}
 	}
 }

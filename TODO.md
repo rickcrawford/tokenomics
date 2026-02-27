@@ -2,12 +2,14 @@
 
 ## Testing
 
-- [ ] Add integration tests for the remote config server (client registration, token sync, webhook push/pull)
-- [ ] Add integration tests for BoltDB store (encryption round-trip, concurrent access, file watch reload)
-- [ ] Add end-to-end tests for the `run` command (proxy lifecycle, env var injection, cleanup on exit)
-- [ ] Add tests for remote webhook receiver (signature verification, event filtering, error handling)
-- [ ] Add tests for remote client periodic sync (interval timing, conflict resolution, network failure recovery)
-- [ ] Add store tests for edge cases (expired tokens, corrupt data, large policies, db file permissions)
+- [x] Add integration tests for the remote config server (client registration, token sync, webhook push/pull)
+- [x] Add integration tests for BoltDB store (encryption round-trip, concurrent access, file watch reload)
+- [x] Add end-to-end tests for the `run` command (proxy lifecycle, env var injection, cleanup on exit)
+- [x] Add tests for remote webhook receiver (signature verification, event filtering, error handling)
+- [x] Add tests for remote client periodic sync (interval timing, conflict resolution, network failure recovery)
+- [x] Add store tests for edge cases (expired tokens, corrupt data, large policies, db file permissions)
+
+- [ ] Fix memory formatting issues
 
 ## Package Manager Distribution
 

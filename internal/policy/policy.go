@@ -14,10 +14,12 @@ type Message struct {
 
 // MemoryConfig controls session memory (conversation logging).
 type MemoryConfig struct {
-	Enabled  bool   `json:"enabled,omitempty"`
-	FilePath string `json:"file_path,omitempty"` // Directory for per-session files, or single file path when FileName is empty
-	FileName string `json:"file_name,omitempty"` // Per-session file name pattern, e.g. "{token_hash}.md" or "{date}/{token_hash}.md"
-	Redis    bool   `json:"redis,omitempty"`     // Push to Redis collection by session
+	Enabled     bool   `json:"enabled,omitempty"`
+	FilePath    string `json:"file_path,omitempty"`    // Directory for per-session files, or single file path when FileName is empty
+	FileName    string `json:"file_name,omitempty"`    // Per-session file name pattern, e.g. "{token_hash}.md" or "{date}/{token_hash}.md"
+	Redis       bool   `json:"redis,omitempty"`        // Push to Redis collection by session
+	MaxSizeMB   int    `json:"max_size_mb,omitempty"`  // Max file size before rotation (0 = unlimited, default: 100 MB)
+	CompressOld bool   `json:"compress_old,omitempty"` // Gzip compress rotated files (default: true)
 }
 
 // RateLimitConfig controls request and token throughput.

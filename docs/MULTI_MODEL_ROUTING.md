@@ -33,7 +33,7 @@ Routing depends on two configuration layers that work together.
 
 ### 1. Provider Config (providers.yaml)
 
-Defines connection details for each provider: upstream URL, auth scheme, custom headers, and chat endpoint path. Ships with 16+ pre-configured providers.
+Defines connection details for each provider: upstream URL, auth scheme, custom headers, and chat endpoint path. Built-in defaults include OpenAI, generic, Anthropic, Azure, Gemini, Groq, Mistral, DeepSeek, and Ollama.
 
 ```yaml
 providers:

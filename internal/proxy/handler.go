@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +113,7 @@ type Handler struct {
 	memWriterMu    sync.Mutex
 	memWriters     map[string]session.MemoryWriter
 	redisMemWriter session.MemoryWriter
+	budgetMu       sync.Mutex
 }
 
 func NewHandler(s store.TokenStore, sess session.Store, hashKey []byte, upstreamURL string, providers map[string]config.ProviderConfig, emitter events.Emitter) *Handler {
@@ -160,14 +163,6 @@ func (h *Handler) SetDebugLogDir(dir string) {
 	h.debugLogDir = dir
 }
 
-// logHash returns a display-safe hash prefix, respecting the hide_token_hash config.
-func (h *Handler) logHash(tokenHash string) string {
-	if h.logging.HideTokenHash {
-		return "****"
-	}
-	return safePrefix(tokenHash, 16)
-}
-
 // Stats returns the UsageStats for registering the stats endpoint.
 func (h *Handler) Stats() *UsageStats {
 	return h.stats
@@ -192,16 +187,41 @@ func (h *Handler) getMemoryWriter(mc policy.MemoryConfig) session.MemoryWriter {
 	h.memWriterMu.Lock()
 	defer h.memWriterMu.Unlock()
 
-	if mc.FilePath != "" {
+	filePath := mc.FilePath
+	// Default to ~/.tokenomics/memory if not specified
+	if filePath == "" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			filePath = filepath.Join(homeDir, ".tokenomics", "memory")
+		} else {
+			filePath = filepath.Join(".tokenomics", "memory")
+		}
+	}
+
+	if filePath != "" {
 		// Per-session files: file_path is a directory, file_name is the pattern
 		if mc.FileName != "" {
-			key := mc.FilePath + ":" + mc.FileName
+			key := filePath + ":" + mc.FileName
 			if w, ok := h.memWriters[key]; ok {
 				return w
 			}
-			w, err := session.NewDirMemoryWriter(mc.FilePath, mc.FileName)
+
+			// Use rotating writer if max size is set (or default 100 MB)
+			// compressOld defaults to true
+			if mc.MaxSizeMB != 0 || mc.CompressOld {
+				w, err := session.NewRotatingDirMemoryWriter(filePath, mc.FileName, mc.MaxSizeMB, mc.CompressOld)
+				if err != nil {
+					log.Printf("[memory] failed to create rotating dir writer for %q: %v", filePath, err)
+					return nil
+				}
+				h.memWriters[key] = w
+				return w
+			}
+
+			// Use regular dir writer if no rotation configured
+			w, err := session.NewDirMemoryWriter(filePath, mc.FileName)
 			if err != nil {
-				log.Printf("[memory] failed to create dir writer for %q: %v", mc.FilePath, err)
+				log.Printf("[memory] failed to create dir writer for %q: %v", filePath, err)
 				return nil
 			}
 			h.memWriters[key] = w
@@ -209,15 +229,15 @@ func (h *Handler) getMemoryWriter(mc policy.MemoryConfig) session.MemoryWriter {
 		}
 
 		// Legacy single-file mode
-		if w, ok := h.memWriters[mc.FilePath]; ok {
+		if w, ok := h.memWriters[filePath]; ok {
 			return w
 		}
-		w, err := session.NewFileMemoryWriter(mc.FilePath)
+		w, err := session.NewFileMemoryWriter(filePath)
 		if err != nil {
-			log.Printf("[memory] failed to create file writer for %q: %v", mc.FilePath, err)
+			log.Printf("[memory] failed to create file writer for %q: %v", filePath, err)
 			return nil
 		}
-		h.memWriters[mc.FilePath] = w
+		h.memWriters[filePath] = w
 		return w
 	}
 	if mc.Redis && h.redisMemWriter != nil {
@@ -341,11 +361,13 @@ func copyHeaders(src, dst http.Header) {
 func httpError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]interface{}{
 			"message": msg,
 			"type":    "tokenomics_error",
 			"code":    code,
 		},
-	})
+	}); err != nil {
+		log.Printf("httpError encode failed: %v", err)
+	}
 }

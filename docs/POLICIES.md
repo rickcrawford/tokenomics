@@ -141,6 +141,7 @@ Content inspection rules that can block, warn, log, or mask matching content. Ru
 | `regex` | Match a Go regular expression | `pattern` |
 | `keyword` | Match case-insensitive keywords with word boundaries | `keywords` (array) |
 | `pii` | Detect personally identifiable information | `detect` (array of PII types) |
+| `jailbreak` | Fast jailbreak/prompt-injection heuristic detector | none |
 
 **Actions:**
 
@@ -276,7 +277,7 @@ Connection details are resolved in this order (first wins):
 2. **Provider config** — `upstream_url` or `api_key_env` from `providers.yaml`
 3. **Global config** — `server.upstream_url` from `config.yaml`
 
-The `providers.yaml` ships with 16 pre-configured providers including OpenAI, Anthropic, Azure OpenAI, Google Gemini, Vertex AI, Mistral, Cohere, Groq, Together, Fireworks, Perplexity, DeepSeek, xAI, OpenRouter, Ollama, vLLM, and LiteLLM.
+Built-in defaults include: `openai`, `generic`, `anthropic`, `azure`, `gemini`, `groq`, `mistral`, `deepseek`, and `ollama`. Additional provider definitions can be added in `providers.yaml` or inline `config.yaml`.
 
 ## Rate Limiting
 
@@ -418,11 +419,26 @@ Use `client_request_id` to correlate Tokenomics logs with the provider's logs wh
 
 ## Memory (Session Logging)
 
-The `memory` field enables conversation logging for the token.
+The `memory` field enables conversation logging for the token. If no `file_path` is specified, it defaults to `~/.tokenomics/memory/` (home directory fallback).
 
 ### Per-session files (recommended)
 
-Write each session to its own file using `file_path` (directory) and `file_name` (pattern):
+Write each session to its own file using `file_path` (directory) and `file_name` (pattern). If `file_path` is omitted, defaults to `.tokenomics/memory/`:
+
+**Minimal configuration (uses default directory and pattern):**
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "file_name": "{token_hash}.md"
+  }
+}
+```
+
+This creates per-token files in `~/.tokenomics/memory/` (e.g., `~/.tokenomics/memory/a1b2c3d4e5f6a1b2.md`).
+
+**Custom directory:**
 
 ```json
 {
@@ -484,6 +500,43 @@ Push entries to a Redis list keyed by session:
 ```
 
 Entries are pushed to `tokenomics:memory:<session_id>` using RPUSH.
+
+### File rotation and compression
+
+For high-volume deployments, limit file growth and optionally compress archived files:
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "file_path": "/var/log/tokenomics/memory",
+    "file_name": "{token_hash}.md",
+    "max_size_mb": 50,
+    "compress_old": true
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_size_mb` | int | (no rotation unless set) | Max file size before rotation. Positive values enable rotation with that size. Negative disables size checks. |
+| `compress_old` | bool | false | Gzip rotated files. Also enables rotating writer behavior. |
+
+When rotation is enabled and a file reaches `max_size_mb`, it's renamed with a timestamp (for example `token.20260227-150405.md`) and a new file is created. If `compress_old` is true, the archived file is gzipped (`token.20260227-150405.md.gz`) and the original is removed.
+
+Example with unlimited size:
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "file_path": "/var/log/tokenomics/memory",
+    "file_name": "{token_hash}.md",
+    "max_size_mb": -1,
+    "compress_old": false
+  }
+}
+```
 
 ## Examples
 

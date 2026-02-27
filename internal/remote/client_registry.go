@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"sync"
 	"time"
 
@@ -77,6 +78,9 @@ func NewClientRegistry(dbPath string) (*ClientRegistry, error) {
 func (cr *ClientRegistry) Register(reg ClientRegistration) (*ClientRegistration, error) {
 	if reg.URL == "" {
 		return nil, fmt.Errorf("url is required")
+	}
+	if err := validateWebhookURL(reg.URL); err != nil {
+		return nil, err
 	}
 
 	reg.ID = generateClientID()
@@ -213,6 +217,23 @@ func registrationToConfig(reg ClientRegistration) events.WebhookConfig {
 // generateClientID creates a random client identifier.
 func generateClientID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fall back to timestamp-based entropy if random source fails.
+		return fmt.Sprintf("cl_%d", time.Now().UnixNano())
+	}
 	return "cl_" + hex.EncodeToString(b)
+}
+
+func validateWebhookURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("invalid url scheme: %s", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("invalid url: host is required")
+	}
+	return nil
 }

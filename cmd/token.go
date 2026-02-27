@@ -72,19 +72,27 @@ var (
 
 func init() {
 	tokenCreateCmd.Flags().StringVar(&policyFlag, "policy", "", "policy JSON (required)")
-	tokenCreateCmd.MarkFlagRequired("policy")
+	if err := tokenCreateCmd.MarkFlagRequired("policy"); err != nil {
+		panic(err)
+	}
 	tokenCreateCmd.Flags().StringVar(&expiresFlag, "expires", "", "expiration duration (e.g., 24h, 7d, 30d) or RFC3339 timestamp")
 
 	tokenGetCmd.Flags().StringVar(&getHash, "hash", "", "token hash to retrieve (required)")
-	tokenGetCmd.MarkFlagRequired("hash")
+	if err := tokenGetCmd.MarkFlagRequired("hash"); err != nil {
+		panic(err)
+	}
 
 	tokenUpdateCmd.Flags().StringVar(&updateHash, "hash", "", "token hash to update (required)")
-	tokenUpdateCmd.MarkFlagRequired("hash")
+	if err := tokenUpdateCmd.MarkFlagRequired("hash"); err != nil {
+		panic(err)
+	}
 	tokenUpdateCmd.Flags().StringVar(&policyFlag, "policy", "", "new policy JSON")
 	tokenUpdateCmd.Flags().StringVar(&expiresFlag, "expires", "", "new expiration (duration, RFC3339, or 'clear' to remove)")
 
 	tokenDeleteCmd.Flags().StringVar(&deleteHash, "hash", "", "token hash to delete (required)")
-	tokenDeleteCmd.MarkFlagRequired("hash")
+	if err := tokenDeleteCmd.MarkFlagRequired("hash"); err != nil {
+		panic(err)
+	}
 
 	tokenCmd.AddCommand(tokenCreateCmd, tokenGetCmd, tokenUpdateCmd, tokenDeleteCmd, tokenListCmd)
 	rootCmd.AddCommand(tokenCmd)

@@ -20,9 +20,35 @@ You can specify a custom path with `--config`:
 ./bin/tokenomics serve --config /etc/tokenomics/config.yaml
 ```
 
+## Directory Structure
+
+By default, all Tokenomics data is stored in `~/.tokenomics/`:
+
+```
+~/.tokenomics/
+├── tokenomics.db              # Token storage (BoltDB)
+├── sessions/                  # Session ledger (JSON files per session)
+│   └── {sessionID}.json
+├── memory/                    # Conversation logs (markdown, per token)
+│   ├── {token_hash}.md
+│   ├── {token_hash}.YYYYMMDD-HHMMSS.md      # Rotated files
+│   └── {token_hash}.YYYYMMDD-HHMMSS.md.gz   # Compressed archives
+├── certs/                     # TLS certificates (auto-generated)
+│   ├── ca.crt
+│   ├── server.crt
+│   └── server.key
+├── proxy.log                  # Proxy debug log
+├── tokenomics.log             # Application log
+└── config.yaml                # Configuration file (optional)
+```
+
+You can override the base directory with `--dir` flag or `dir:` in config.yaml.
+
 ### Full Reference
 
 ```yaml
+dir: ""                    # Base directory for all data (default: ~/.tokenomics)
+
 server:
   http_port: 8080          # HTTP listener port (set to 0 to disable)
   https_port: 8443         # HTTPS listener port
@@ -30,7 +56,7 @@ server:
   tls:
     enabled: true          # Enable the HTTPS listener
     auto_gen: true         # Auto-generate CA + server certificates on first run
-    cert_dir: "./certs"    # Directory for auto-generated certificates
+    cert_dir: ""           # Directory for auto-generated certificates (default: {dir}/certs)
     cert_file: ""          # Path to a custom TLS certificate (disables auto_gen)
     key_file: ""           # Path to a custom TLS private key (disables auto_gen)
 
@@ -54,8 +80,12 @@ logging:
   request_body: false        # Log full request bodies
   response_body: false       # Log full response bodies
   hide_token_hash: false     # Mask token hashes in logs
-  disable_request: false     # Suppress per-request structured logs
+  disable_request: true      # Suppress per-request structured logs (default: true)
   proxy_log_file: "proxy.log" # Proxy debug log filename under `dir`
+  file:
+    enabled: false           # Enable application log file (default: false)
+    level: "info"            # Log level for file: "debug", "info", "warn", "error"
+    path: ""                 # Log file path (default: {dir}/tokenomics.log if enabled)
 
 events:
   webhooks:
@@ -91,8 +121,7 @@ default_provider: ""           # Default provider when not specified in policy (
 
 # ── Session Ledger ───────────────────────────────────────────────────
 ledger:
-  enabled: true              # Enable per-session token tracking to .tokenomics/
-  dir: ".tokenomics"         # Directory for session files
+  enabled: true              # Enable per-session token tracking (stored in the main dir)
   memory: true               # Record conversation content in memory/ subdirectory
 ```
 
@@ -100,15 +129,16 @@ ledger:
 
 | Field | Default | Description |
 |-------|---------|-------------|
+| `dir` | `~/.tokenomics` | Base directory for database, certificates, session ledger, memory logs, and debug logs. Defaults to `~/.tokenomics` (user's home directory). Can be overridden with `--dir` flag. |
 | `server.http_port` | `8080` | Port for the HTTP listener. Set to `0` to disable. |
 | `server.https_port` | `8443` | Port for the HTTPS listener. |
 | `server.upstream_url` | `https://api.openai.com` | Default upstream URL for proxied requests. Per-policy overrides take precedence. |
 | `server.tls.enabled` | `true` | Whether to start the HTTPS listener. |
 | `server.tls.auto_gen` | `true` | Auto-generate a root CA and server certificate on first run. |
-| `server.tls.cert_dir` | `./certs` | Directory where auto-generated certs are stored. |
+| `server.tls.cert_dir` | `{dir}/certs` | Directory where auto-generated certs are stored. Defaults to `~/.tokenomics/certs`. |
 | `server.tls.cert_file` | (empty) | Path to a custom server certificate. When set, `auto_gen` is bypassed. |
 | `server.tls.key_file` | (empty) | Path to a custom server private key. When set, `auto_gen` is bypassed. |
-| `storage.db_path` | `./tokenomics.db` | Path to the BoltDB database file. |
+| `storage.db_path` | `{dir}/tokenomics.db` | Path to the BoltDB database file. Defaults to `~/.tokenomics/tokenomics.db`. |
 | `session.backend` | `memory` | Session tracking backend. Use `"redis"` for persistence across restarts. |
 | `session.redis.addr` | `localhost:6379` | Redis server address. |
 | `session.redis.password` | (empty) | Redis password. |
@@ -120,8 +150,11 @@ ledger:
 | `logging.request_body` | `false` | Include full request body in logs. |
 | `logging.response_body` | `false` | Include full response body in logs. |
 | `logging.hide_token_hash` | `false` | Replace token hashes with `****` in logs. |
-| `logging.disable_request` | `false` | Suppress per-request structured log entries entirely. |
+| `logging.disable_request` | `true` | Suppress per-request structured log entries entirely. |
 | `logging.proxy_log_file` | `proxy.log` | Proxy debug log filename created under `dir` (for example `.tokenomics/proxy.log`). |
+| `logging.file.enabled` | `false` | Enable application log file output (in addition to stdout). |
+| `logging.file.level` | `info` | Log level for file output: `debug`, `info`, `warn`, `error`. |
+| `logging.file.path` | `{dir}/tokenomics.log` | Path to the application log file. Defaults to `~/.tokenomics/tokenomics.log` when enabled. |
 | `events.webhooks[].url` | (required) | Webhook endpoint URL. |
 | `events.webhooks[].secret` | (empty) | Shared secret sent as `X-Webhook-Secret`. |
 | `events.webhooks[].signing_key` | (empty) | HMAC-SHA256 signing key for `X-Webhook-Signature`. |
@@ -141,26 +174,53 @@ ledger:
 | `remote.webhook.insecure` | `false` | Tell the server to skip TLS verification when delivering to this client. |
 | `cli_maps` | (see below) | Maps CLI names to providers for auto-detection in `tokenomics run`. Example: `claude: anthropic` means `tokenomics run claude` uses the anthropic provider. |
 | `default_provider` | (empty) | Default provider when not specified in policy (e.g. `openai`, `anthropic`). |
-| `ledger.enabled` | `true` | Enable per-session token tracking to the `.tokenomics/` directory. |
-| `ledger.dir` | `.tokenomics` | Directory for session files and memory logs. |
-| `ledger.memory` | `true` | Record conversation content (user/assistant messages) in memory markdown files. |
+| `ledger.enabled` | `true` | Enable per-session token tracking. Session files and memory logs are stored in the main `dir` setting. |
+| `ledger.memory` | `true` | Record conversation content (user/assistant messages) in memory markdown files under `{dir}/memory/`. |
 
 ### Session Ledger Notes
 
-Session request entries and memory content accumulate in memory until the proxy is restarted. In high-volume deployments (>10K requests/day), restart the proxy periodically (e.g., nightly) to prevent unbounded memory growth. Token counts and usage summaries are durable in the BoltDB ledger; restarting does not lose historical data.
+Session request entries are accumulated in memory for the current process and written to `sessions/*.json` on graceful shutdown. Conversation memory entries are streamed to markdown files as they happen.
+
+If the process crashes or is terminated without shutdown handling, the in-memory request rollup for that run can be lost.
 
 ## Logging
 
-### File Output
+### Controlling Log Output
 
-By default, logs are written to stdout. To write logs to a file, set the `TOKENOMICS_LOG_FILE` environment variable:
+By default, logs are written to stdout only. To enable file logging:
 
+**Via config.yaml:**
+```yaml
+logging:
+  file:
+    enabled: true
+    level: "info"             # or "debug", "warn", "error"
+    path: "~/.tokenomics/tokenomics.log"
+```
+
+**Via environment variables:**
 ```bash
-export TOKENOMICS_LOG_FILE="~/.tokenomics/tokenomics.log"
+export TOKENOMICS_LOGGING_FILE_ENABLED=true
+export TOKENOMICS_LOGGING_FILE_LEVEL=info
+export TOKENOMICS_LOGGING_FILE_PATH="~/.tokenomics/tokenomics.log"
 ./bin/tokenomics serve
 ```
 
-The log file will be created if it doesn't exist, and logs will be appended on subsequent runs.
+When enabled, the specified file is created if it doesn't exist, and logs are appended on subsequent runs.
+
+### Per-Request Logging
+
+Per-request structured logs are disabled by default. To enable them:
+
+```yaml
+logging:
+  disable_request: false    # enable per-request logs
+```
+
+Or via environment variable:
+```bash
+export TOKENOMICS_LOGGING_DISABLE_REQUEST=false
+```
 
 ## Environment Variables
 
@@ -183,7 +243,6 @@ Every config field can be overridden with a `TOKENOMICS_` prefixed environment v
 | `session.redis.db` | `TOKENOMICS_SESSION_REDIS_DB` |
 | `security.hash_key_env` | `TOKENOMICS_SECURITY_HASH_KEY_ENV` |
 | `security.encryption_key_env` | `TOKENOMICS_SECURITY_ENCRYPTION_KEY_ENV` |
-| (logging output) | `TOKENOMICS_LOG_FILE` |
 | `logging.level` | `TOKENOMICS_LOGGING_LEVEL` |
 | `logging.format` | `TOKENOMICS_LOGGING_FORMAT` |
 | `logging.request_body` | `TOKENOMICS_LOGGING_REQUEST_BODY` |
@@ -197,7 +256,6 @@ Every config field can be overridden with a `TOKENOMICS_` prefixed environment v
 | `remote.sync` | `TOKENOMICS_REMOTE_SYNC` |
 | `remote.insecure` | `TOKENOMICS_REMOTE_INSECURE` |
 | `ledger.enabled` | `TOKENOMICS_LEDGER_ENABLED` |
-| `ledger.dir` | `TOKENOMICS_LEDGER_DIR` |
 | `ledger.memory` | `TOKENOMICS_LEDGER_MEMORY` |
 
 Example:

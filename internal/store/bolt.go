@@ -27,6 +27,8 @@ type BoltStore struct {
 	cache map[string]*cacheEntry
 
 	stopWatch chan struct{}
+	watchWG   sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // SetEmitter configures the event emitter for token lifecycle events.
@@ -36,7 +38,9 @@ func (s *BoltStore) SetEmitter(e events.Emitter) {
 
 func (s *BoltStore) emit(eventType string, data map[string]interface{}) {
 	if s.emitter != nil {
-		s.emitter.Emit(context.Background(), events.New(eventType, data))
+		if err := s.emitter.Emit(context.Background(), events.New(eventType, data)); err != nil {
+			log.Printf("store emit error (%s): %v", eventType, err)
+		}
 	}
 }
 
@@ -291,19 +295,32 @@ func (s *BoltStore) Delete(tokenHash string) error {
 
 func (s *BoltStore) Lookup(tokenHash string) (*policy.Policy, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	entry, ok := s.cache[tokenHash]
 	if !ok {
+		s.mu.RUnlock()
 		return nil, nil
 	}
-	// Check expiration
 	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
-		s.emit(events.TokenExpired, map[string]interface{}{
-			"token_hash": keyPrefix([]byte(tokenHash)),
-			"expired_at": entry.expiresAt.Format(time.RFC3339),
-		})
+		expiredAt := entry.expiresAt
+		s.mu.RUnlock()
+
+		emitExpired := false
+		s.mu.Lock()
+		if latest, exists := s.cache[tokenHash]; exists && !latest.expiresAt.IsZero() && time.Now().After(latest.expiresAt) {
+			delete(s.cache, tokenHash)
+			emitExpired = true
+		}
+		s.mu.Unlock()
+
+		if emitExpired {
+			s.emit(events.TokenExpired, map[string]interface{}{
+				"token_hash": keyPrefix([]byte(tokenHash)),
+				"expired_at": expiredAt.Format(time.RFC3339),
+			})
+		}
 		return nil, nil
 	}
+	s.mu.RUnlock()
 	return entry.policy, nil
 }
 
@@ -405,7 +422,9 @@ func keyPrefix(k []byte) string {
 
 // StartFileWatch starts a goroutine that polls the DB file for changes and reloads.
 func (s *BoltStore) StartFileWatch(interval time.Duration) {
+	s.watchWG.Add(1)
 	go func() {
+		defer s.watchWG.Done()
 		var lastMod time.Time
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -431,9 +450,13 @@ func (s *BoltStore) StartFileWatch(interval time.Duration) {
 }
 
 func (s *BoltStore) Close() error {
-	close(s.stopWatch)
-	if s.db != nil {
-		return s.db.Close()
-	}
-	return nil
+	var closeErr error
+	s.closeOnce.Do(func() {
+		close(s.stopWatch)
+		s.watchWG.Wait()
+		if s.db != nil {
+			closeErr = s.db.Close()
+		}
+	})
+	return closeErr
 }

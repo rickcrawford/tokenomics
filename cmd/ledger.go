@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -65,7 +66,24 @@ func getLedgerDir() string {
 	// Try loading from config
 	cfg, err := config.Load(cfgFile)
 	if err == nil {
-		return cfg.Ledger.Dir // Already resolved to cfg.Dir in config.Load()
+		dir := cfg.Dir
+		if dir == "" {
+			homeDir, err := os.UserHomeDir()
+			if err == nil {
+				dir = filepath.Join(homeDir, ".tokenomics")
+			}
+		}
+		if !filepath.IsAbs(dir) {
+			if abs, err := filepath.Abs(dir); err == nil {
+				dir = abs
+			}
+		}
+		return dir
+	}
+	// Fallback to home directory
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		return filepath.Join(homeDir, ".tokenomics")
 	}
 	return ".tokenomics"
 }

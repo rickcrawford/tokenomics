@@ -66,16 +66,20 @@ func TestHandler_BearerAuth(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-test",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hi"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "TEST_API_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_test"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
@@ -111,11 +115,13 @@ func TestHandler_HeaderAuth(t *testing.T) {
 		capturedAuthHeader = r.Header.Get("x-api-key")
 		capturedExtraHeader = r.Header.Get("anthropic-version")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "msg_test",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hi"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -127,7 +133,9 @@ func TestHandler_HeaderAuth(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_ant"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"claude-3-opus","messages":[{"role":"user","content":"hi"}]}`))
@@ -162,11 +170,13 @@ func TestHandler_QueryAuth(t *testing.T) {
 		capturedQueryKey = r.URL.Query().Get("key")
 		capturedAuthHeader = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"responseId": "resp-test",
 			"choices":    []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hi"}}},
 			"usage":      map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -178,7 +188,9 @@ func TestHandler_QueryAuth(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_gem"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gemini-pro","messages":[{"role":"user","content":"hi"}]}`))
@@ -210,11 +222,13 @@ func TestHandler_ChatPathOverride(t *testing.T) {
 	}, func(w http.ResponseWriter, r *http.Request) {
 		capturedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "test-id",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hi"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -226,7 +240,9 @@ func TestHandler_ChatPathOverride(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_co"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"command-r","messages":[{"role":"user","content":"hi"}]}`))
@@ -255,11 +271,13 @@ func TestHandler_ProviderAPIKeyEnvFallback(t *testing.T) {
 	}, func(w http.ResponseWriter, r *http.Request) {
 		capturedAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "test-id",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hi"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -273,7 +291,9 @@ func TestHandler_ProviderAPIKeyEnvFallback(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_groq"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"llama-3-70b","messages":[{"role":"user","content":"hi"}]}`))
@@ -305,7 +325,9 @@ func TestHandler_ProviderNameInResolvedPolicy(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 
 	resolved := pol.ResolveForModel("gpt-4o")
 	if resolved.ProviderName != "openai" {
@@ -338,11 +360,13 @@ func TestHandler_MultiProviderHeaders(t *testing.T) {
 	}, func(w http.ResponseWriter, r *http.Request) {
 		capturedHeaders = r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "test-id",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hi"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -353,7 +377,9 @@ func TestHandler_MultiProviderHeaders(t *testing.T) {
 			}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_custom"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"test-model","messages":[{"role":"user","content":"hi"}]}`))
@@ -414,12 +440,16 @@ func TestHandler_Passthrough(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		capturedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[]}`))
+		if _, err := w.Write([]byte(`{"data":[]}`)); err != nil {
+			t.Fatalf("write passthrough response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "TEST_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_pass"), pol)
 
 	req := httptest.NewRequest("GET", "/v1/models", nil)
@@ -448,12 +478,16 @@ func TestHandler_PassthroughXApiKeyHeaderCleaned(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		upstreamHeaders = r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[]}`))
+		if _, err := w.Write([]byte(`{"data":[]}`)); err != nil {
+			t.Fatalf("write passthrough response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "PT_XAPI_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_pt_xapi"), pol)
 
 	req := httptest.NewRequest("GET", "/v1/models", nil)
@@ -486,12 +520,16 @@ func TestHandler_PassthroughAuthHeaderCleaned(t *testing.T) {
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		upstreamHeaders = r.Header.Clone()
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"data":[]}`))
+		if _, err := w.Write([]byte(`{"data":[]}`)); err != nil {
+			t.Fatalf("write passthrough response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "PT_AUTH_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_pt_auth"), pol)
 
 	req := httptest.NewRequest("GET", "/v1/models", nil)
@@ -682,16 +720,20 @@ func TestHandler_OpenClawMetadataInRequest(t *testing.T) {
 
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-test",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "response"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 10},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "TEST_API_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_ocm_test"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4","messages":[{"role":"user","content":"test"}]}`))

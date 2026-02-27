@@ -69,7 +69,9 @@ func TestReadPIDFile_NotExist(t *testing.T) {
 func TestReadPIDFile_InvalidContent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.pid")
-	os.WriteFile(path, []byte("not-a-number"), 0o644)
+	if err := os.WriteFile(path, []byte("not-a-number"), 0o644); err != nil {
+		t.Fatalf("write bad pid: %v", err)
+	}
 
 	_, err := readPIDFile(path)
 	if err == nil {

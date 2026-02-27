@@ -22,7 +22,9 @@ func TestWebhookEmitter_Deliver(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var evt Event
-		json.Unmarshal(body, &evt)
+		if err := json.Unmarshal(body, &evt); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
 		mu.Lock()
 		received = append(received, evt)
 		mu.Unlock()
@@ -35,9 +37,11 @@ func TestWebhookEmitter_Deliver(t *testing.T) {
 		TimeoutSec: 5,
 	})
 
-	emitter.Emit(context.Background(), New(TokenCreated, map[string]interface{}{
+	if err := emitter.Emit(context.Background(), New(TokenCreated, map[string]interface{}{
 		"token_hash": "abc123",
-	}))
+	})); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
 
 	emitter.Close()
 
@@ -69,7 +73,9 @@ func TestWebhookEmitter_SharedSecret(t *testing.T) {
 		Secret: "my-secret-123",
 	})
 
-	emitter.Emit(context.Background(), New(TokenDeleted, nil))
+	if err := emitter.Emit(context.Background(), New(TokenDeleted, nil)); err != nil {
+		t.Fatalf("emit token.deleted: %v", err)
+	}
 	emitter.Close()
 
 	if gotSecret != "my-secret-123" {
@@ -94,9 +100,11 @@ func TestWebhookEmitter_HMACSigning(t *testing.T) {
 		SigningKey: signingKey,
 	})
 
-	emitter.Emit(context.Background(), New(RuleViolation, map[string]interface{}{
+	if err := emitter.Emit(context.Background(), New(RuleViolation, map[string]interface{}{
 		"rule_name": "test-rule",
-	}))
+	})); err != nil {
+		t.Fatalf("emit rule.violation: %v", err)
+	}
 	emitter.Close()
 
 	if gotSignature == "" {
@@ -132,12 +140,24 @@ func TestWebhookEmitter_EventFilter(t *testing.T) {
 		Events: []string{"token.*", "rule.violation"},
 	})
 
-	emitter.Emit(context.Background(), New(TokenCreated, nil))     // matches token.*
-	emitter.Emit(context.Background(), New(TokenDeleted, nil))     // matches token.*
-	emitter.Emit(context.Background(), New(RuleViolation, nil))    // matches rule.violation exactly
-	emitter.Emit(context.Background(), New(RuleWarning, nil))      // does NOT match
-	emitter.Emit(context.Background(), New(BudgetExceeded, nil))   // does NOT match
-	emitter.Emit(context.Background(), New(RequestCompleted, nil)) // does NOT match
+	if err := emitter.Emit(context.Background(), New(TokenCreated, nil)); err != nil { // matches token.*
+		t.Fatalf("emit token.created: %v", err)
+	}
+	if err := emitter.Emit(context.Background(), New(TokenDeleted, nil)); err != nil { // matches token.*
+		t.Fatalf("emit token.deleted: %v", err)
+	}
+	if err := emitter.Emit(context.Background(), New(RuleViolation, nil)); err != nil { // matches rule.violation exactly
+		t.Fatalf("emit rule.violation: %v", err)
+	}
+	if err := emitter.Emit(context.Background(), New(RuleWarning, nil)); err != nil { // does NOT match
+		t.Fatalf("emit rule.warning: %v", err)
+	}
+	if err := emitter.Emit(context.Background(), New(BudgetExceeded, nil)); err != nil { // does NOT match
+		t.Fatalf("emit budget.exceeded: %v", err)
+	}
+	if err := emitter.Emit(context.Background(), New(RequestCompleted, nil)); err != nil { // does NOT match
+		t.Fatalf("emit request.completed: %v", err)
+	}
 
 	emitter.Close()
 
@@ -165,9 +185,15 @@ func TestWebhookEmitter_WildcardFilterAll(t *testing.T) {
 		URL: ts.URL,
 	})
 
-	emitter.Emit(context.Background(), New(TokenCreated, nil))
-	emitter.Emit(context.Background(), New(RuleViolation, nil))
-	emitter.Emit(context.Background(), New(ServerStart, nil))
+	if err := emitter.Emit(context.Background(), New(TokenCreated, nil)); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
+	if err := emitter.Emit(context.Background(), New(RuleViolation, nil)); err != nil {
+		t.Fatalf("emit rule.violation: %v", err)
+	}
+	if err := emitter.Emit(context.Background(), New(ServerStart, nil)); err != nil {
+		t.Fatalf("emit server.start: %v", err)
+	}
 
 	emitter.Close()
 
@@ -175,6 +201,41 @@ func TestWebhookEmitter_WildcardFilterAll(t *testing.T) {
 	defer mu.Unlock()
 	if count != 3 {
 		t.Fatalf("expected 3 events (no filter), got %d", count)
+	}
+}
+
+func TestWebhookEmitter_EventFilterCatchAllWildcard(t *testing.T) {
+	var count int
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		count++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	emitter := NewWebhookEmitter(WebhookConfig{
+		URL:    ts.URL,
+		Events: []string{"*"},
+	})
+
+	if err := emitter.Emit(context.Background(), New(TokenCreated, nil)); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
+	if err := emitter.Emit(context.Background(), New(RuleViolation, nil)); err != nil {
+		t.Fatalf("emit rule.violation: %v", err)
+	}
+	if err := emitter.Emit(context.Background(), New(ServerStart, nil)); err != nil {
+		t.Fatalf("emit server.start: %v", err)
+	}
+	emitter.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if count != 3 {
+		t.Fatalf("expected 3 events for catch-all wildcard, got %d", count)
 	}
 }
 
@@ -191,7 +252,9 @@ func TestWebhookEmitter_Headers(t *testing.T) {
 	defer ts.Close()
 
 	emitter := NewWebhookEmitter(WebhookConfig{URL: ts.URL})
-	emitter.Emit(context.Background(), New(ServerStart, nil))
+	if err := emitter.Emit(context.Background(), New(ServerStart, nil)); err != nil {
+		t.Fatalf("emit server.start: %v", err)
+	}
 	emitter.Close()
 
 	if !strings.HasPrefix(gotEventID, "evt_") {
@@ -225,13 +288,20 @@ func TestWebhookEmitter_Non2xxRetries(t *testing.T) {
 		TimeoutSec: 2,
 	})
 
-	emitter.Emit(context.Background(), New(TokenCreated, nil))
+	start := time.Now()
+	if err := emitter.Emit(context.Background(), New(TokenCreated, nil)); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
 	emitter.Close()
+	elapsed := time.Since(start)
 
 	mu.Lock()
 	defer mu.Unlock()
-	if attempts < 2 {
-		t.Errorf("expected at least 2 retry attempts, got %d", attempts)
+	if attempts != 3 {
+		t.Errorf("expected 3 attempts for 5xx retries, got %d", attempts)
+	}
+	if elapsed < 6*time.Second {
+		t.Errorf("expected exponential backoff delays (>=6s), got %v", elapsed)
 	}
 }
 
@@ -248,13 +318,44 @@ func TestWebhookEmitter_4xxNoRetry(t *testing.T) {
 	defer ts.Close()
 
 	emitter := NewWebhookEmitter(WebhookConfig{URL: ts.URL})
-	emitter.Emit(context.Background(), New(TokenCreated, nil))
+	if err := emitter.Emit(context.Background(), New(TokenCreated, nil)); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
 	emitter.Close()
 
 	mu.Lock()
 	defer mu.Unlock()
 	if attempts != 1 {
 		t.Errorf("expected 1 attempt (no retry for 400), got %d", attempts)
+	}
+}
+
+func TestWebhookEmitter_429Retries(t *testing.T) {
+	var attempts int
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer ts.Close()
+
+	emitter := NewWebhookEmitter(WebhookConfig{
+		URL:        ts.URL,
+		TimeoutSec: 2,
+	})
+
+	if err := emitter.Emit(context.Background(), New(TokenCreated, nil)); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
+	emitter.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if attempts != 3 {
+		t.Errorf("expected 3 attempts for 429 retries, got %d", attempts)
 	}
 }
 
@@ -283,7 +384,9 @@ func TestMultiEmitter(t *testing.T) {
 		NewWebhookEmitter(WebhookConfig{URL: ts2.URL}),
 	)
 
-	emitter.Emit(context.Background(), New(TokenCreated, nil))
+	if err := emitter.Emit(context.Background(), New(TokenCreated, nil)); err != nil {
+		t.Fatalf("emit token.created: %v", err)
+	}
 	emitter.Close()
 
 	mu.Lock()
@@ -388,7 +491,9 @@ func BenchmarkNopEmit(b *testing.B) {
 	evt := New(TokenCreated, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		nop.Emit(ctx, evt)
+		if err := nop.Emit(ctx, evt); err != nil {
+			b.Fatalf("nop emit failed: %v", err)
+		}
 	}
 }
 
@@ -403,7 +508,9 @@ func BenchmarkWebhookEmit_Filtered(b *testing.B) {
 	evt := New(RuleViolation, nil) // won't match token.* filter
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		emitter.Emit(ctx, evt)
+		if err := emitter.Emit(ctx, evt); err != nil {
+			b.Fatalf("emit filtered benchmark event: %v", err)
+		}
 	}
 }
 
@@ -418,7 +525,9 @@ func BenchmarkWebhookEmit_Queued(b *testing.B) {
 	evt := New(TokenCreated, nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		emitter.Emit(ctx, evt)
+		if err := emitter.Emit(ctx, evt); err != nil {
+			b.Fatalf("emit queued benchmark event: %v", err)
+		}
 	}
 }
 

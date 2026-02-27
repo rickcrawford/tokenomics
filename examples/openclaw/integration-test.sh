@@ -20,6 +20,8 @@ NC='\033[0m' # No Color
 TESTS_PASSED=0
 TESTS_FAILED=0
 TESTS_SKIPPED=0
+TEST_TOKEN=""
+TEST_HASH=""
 
 # Helper functions
 log_info() {
@@ -73,7 +75,7 @@ assert_equals() {
 # Check if tokenomics is running
 check_tokenomics() {
   log_info "Checking if tokenomics is running at $TOKENOMICS_URL"
-  if curl -s "$TOKENOMICS_URL/health" | grep -q "ready"; then
+  if curl -s "$TOKENOMICS_URL/health" | grep -q "\"ok\""; then
     log_info "Tokenomics is running ✓"
     return 0
   else
@@ -90,8 +92,18 @@ test_token_creation() {
   log_warn "║     Test 1: Token Creation             ║"
   log_warn "╚═══════════════════════════════════════╝"
 
-  assert_success "Create Slack bot token" \
-    "$TOKENOMICS_BIN token create --policy @${SCRIPT_DIR}/policies/slack-bot.json --expires 1y 2>&1 | grep -q 'Token created'"
+  log_test "Create Slack bot token"
+  SLACK_OUTPUT=$($TOKENOMICS_BIN token create --policy @${SCRIPT_DIR}/policies/slack-bot.json --expires 1y 2>&1)
+  if echo "$SLACK_OUTPUT" | grep -q "Token created"; then
+    TEST_TOKEN=$(echo "$SLACK_OUTPUT" | awk '/^Token: / {print $2}')
+    TEST_HASH=$(echo "$SLACK_OUTPUT" | awk '/^Hash: / {print $2}')
+    echo -e "  ${GREEN}✓ PASSED${NC}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+  else
+    echo -e "  ${RED}✗ FAILED${NC}"
+    echo "$SLACK_OUTPUT"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+  fi
 
   assert_success "Create Discord bot token" \
     "$TOKENOMICS_BIN token create --policy @${SCRIPT_DIR}/policies/discord-bot.json --expires 1y 2>&1 | grep -q 'Token created'"
@@ -110,17 +122,14 @@ test_authentication() {
   log_warn "║     Test 2: Authentication            ║"
   log_warn "╚═══════════════════════════════════════╝"
 
-  # Get a token hash
-  TOKEN_HASH=$($TOKENOMICS_BIN token list 2>&1 | head -2 | tail -1 | awk '{print $1}')
-
-  if [ -z "$TOKEN_HASH" ]; then
+  if [ -z "$TEST_TOKEN" ]; then
     log_warn "No tokens found, skipping authentication test"
     TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
     return
   fi
 
   assert_success "Authenticate with valid token" \
-    "curl -s -H 'Authorization: Bearer $TOKEN_HASH' $TOKENOMICS_URL/v1/models 2>&1 | grep -q 'data'"
+    "curl -s -H 'Authorization: Bearer $TEST_TOKEN' $TOKENOMICS_URL/v1/models 2>&1 | grep -q 'data'"
 }
 
 # Test 3: PII Detection
@@ -130,9 +139,7 @@ test_pii_detection() {
   log_warn "║     Test 3: PII Detection              ║"
   log_warn "╚═══════════════════════════════════════╝"
 
-  TOKEN_HASH=$($TOKENOMICS_BIN token list 2>&1 | head -2 | tail -1 | awk '{print $1}')
-
-  if [ -z "$TOKEN_HASH" ]; then
+  if [ -z "$TEST_TOKEN" ]; then
     log_warn "No tokens found, skipping PII test"
     TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
     return
@@ -143,7 +150,7 @@ test_pii_detection() {
 
   log_test "PII detection in request"
   RESPONSE=$(curl -s -X POST \
-    -H "Authorization: Bearer $TOKEN_HASH" \
+    -H "Authorization: Bearer $TEST_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$REQUEST_JSON" \
     "$TOKENOMICS_URL/v1/chat/completions")
@@ -165,9 +172,7 @@ test_jailbreak_detection() {
   log_warn "║     Test 4: Jailbreak Detection        ║"
   log_warn "╚═══════════════════════════════════════╝"
 
-  TOKEN_HASH=$($TOKENOMICS_BIN token list 2>&1 | head -2 | tail -1 | awk '{print $1}')
-
-  if [ -z "$TOKEN_HASH" ]; then
+  if [ -z "$TEST_TOKEN" ]; then
     log_warn "No tokens found, skipping jailbreak test"
     TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
     return
@@ -178,7 +183,7 @@ test_jailbreak_detection() {
 
   log_test "Jailbreak detection in request"
   RESPONSE=$(curl -s -X POST \
-    -H "Authorization: Bearer $TOKEN_HASH" \
+    -H "Authorization: Bearer $TEST_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$REQUEST_JSON" \
     "$TOKENOMICS_URL/v1/chat/completions")
@@ -201,16 +206,14 @@ test_budget_enforcement() {
   log_warn "╚═══════════════════════════════════════╝"
 
   log_test "Check token budget limits"
-  TOKEN_HASH=$($TOKENOMICS_BIN token list 2>&1 | head -2 | tail -1 | awk '{print $1}')
-
-  if [ -z "$TOKEN_HASH" ]; then
+  if [ -z "$TEST_HASH" ]; then
     log_warn "No tokens found"
     TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
     return
   fi
 
   # Get token details and verify budget is set
-  DETAILS=$($TOKENOMICS_BIN token get --hash "$TOKEN_HASH" 2>&1)
+  DETAILS=$($TOKENOMICS_BIN token get --hash "$TEST_HASH" 2>&1)
 
   if echo "$DETAILS" | grep -q "max_tokens"; then
     echo -e "  ${GREEN}✓ PASSED${NC}: Budget limits are set"

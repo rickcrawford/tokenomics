@@ -27,11 +27,14 @@ import (
 // maxResponseBodySize limits upstream response body reads (32 MB).
 const maxResponseBodySize = 32 * 1024 * 1024
 
+// maxMemoryContentSize caps memory-captured content (512 KB).
+const maxMemoryContentSize = 512 * 1024
+
 // debugLogger is a persistent logger for proxy debug output
 var (
-	debugLogger     *log.Logger
-	debugOnce       sync.Once
-	debugLogDirPath string // Set via InitDebugLogger before first use
+	debugLogger      *log.Logger
+	debugOnce        sync.Once
+	debugLogDirPath  string // Set via InitDebugLogger before first use
 	debugLogFileName string
 )
 
@@ -105,7 +108,7 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		}
 
 		// Emit OpenClaw success/error events if metadata is present
-		if openClawEventMeta != nil && len(openClawEventMeta) > 0 {
+		if len(openClawEventMeta) > 0 {
 			if logEntry.StatusCode >= 200 && logEntry.StatusCode < 300 {
 				h.emitOpenClawEvent(r.Context(), events.OpenClawAgentSuccess, openClawEventMeta, logEntry.StatusCode, logEntry.Model, tokenHash, "")
 			} else {
@@ -200,9 +203,11 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 	// Rate limit check
 	if err := h.rateLimiter.Allow(tokenHash, resolved.RateLimit); err != nil {
-		h.emitter.Emit(r.Context(), events.New(events.RateExceeded, map[string]interface{}{
+		if emitErr := h.emitter.Emit(r.Context(), events.New(events.RateExceeded, map[string]interface{}{
 			"token_hash": safePrefix(tokenHash, 16), "model": model, "error": err.Error(),
-		}))
+		})); emitErr != nil {
+			debugLog("failed to emit rate exceeded event: %v", emitErr)
+		}
 		logEntry.StatusCode = http.StatusTooManyRequests
 		logEntry.Error = err.Error()
 		httpError(w, http.StatusTooManyRequests, err.Error())
@@ -249,13 +254,13 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 					"token_hash": safePrefix(tokenHash, 16), "model": model,
 					"rule_name": match.Name, "message": match.Message,
 				}
-				// Include OpenClaw metadata in rule violation events
-				if openClawEventMeta != nil {
-					for k, v := range openClawEventMeta {
-						ruleEvent[k] = v
-					}
+				// Include OpenClaw metadata in rule violation events.
+				for k, v := range openClawEventMeta {
+					ruleEvent[k] = v
 				}
-				h.emitter.Emit(r.Context(), events.New(events.RuleViolation, ruleEvent))
+				if emitErr := h.emitter.Emit(r.Context(), events.New(events.RuleViolation, ruleEvent)); emitErr != nil {
+					debugLog("failed to emit rule violation event: %v", emitErr)
+				}
 			}
 			log.Printf("[rule:fail] policy violation: %s (token=%s model=%s)", err.Error(), safePrefix(tokenHash, 16), model)
 			logEntry.StatusCode = http.StatusForbidden
@@ -276,10 +281,12 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			if match.Action == "warn" {
 				evtType = events.RuleWarning
 			}
-			h.emitter.Emit(r.Context(), events.New(evtType, map[string]interface{}{
+			if emitErr := h.emitter.Emit(r.Context(), events.New(evtType, map[string]interface{}{
 				"token_hash": safePrefix(tokenHash, 16), "model": model,
 				"rule_name": match.Name, "action": match.Action, "message": match.Message,
-			}))
+			})); emitErr != nil {
+				debugLog("failed to emit rule event: %v", emitErr)
+			}
 			log.Printf("[rule:%s] %s (token=%s model=%s)", match.Action, match.Message, safePrefix(tokenHash, 16), model)
 		}
 
@@ -292,9 +299,11 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				Action:  "mask",
 				Message: "content redacted before forwarding",
 			})
-			h.emitter.Emit(r.Context(), events.New(events.RuleMask, map[string]interface{}{
+			if emitErr := h.emitter.Emit(r.Context(), events.New(events.RuleMask, map[string]interface{}{
 				"token_hash": safePrefix(tokenHash, 16), "model": model,
-			}))
+			})); emitErr != nil {
+				debugLog("failed to emit rule mask event: %v", emitErr)
+			}
 			log.Printf("[rule:mask] content redacted (token=%s model=%s)", safePrefix(tokenHash, 16), model)
 		}
 	}
@@ -318,20 +327,30 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	}
 	logEntry.InputTokens = inputTokens
 
+	var reservedInput int64
+	var committedInput bool
 	if resolved.MaxTokens > 0 {
-		usage, _ := h.sessions.GetUsage(tokenHash)
-		if usage+int64(inputTokens) > resolved.MaxTokens {
-			h.emitter.Emit(r.Context(), events.New(events.BudgetExceeded, map[string]interface{}{
+		currentUsage, err := h.reserveInputBudget(tokenHash, int64(inputTokens), resolved.MaxTokens)
+		if err != nil {
+			if emitErr := h.emitter.Emit(r.Context(), events.New(events.BudgetExceeded, map[string]interface{}{
 				"token_hash": safePrefix(tokenHash, 16), "model": model,
-				"used": usage, "input": inputTokens, "limit": resolved.MaxTokens,
-			}))
+				"used": currentUsage, "input": inputTokens, "limit": resolved.MaxTokens,
+			})); emitErr != nil {
+				debugLog("failed to emit budget exceeded event: %v", emitErr)
+			}
 			logEntry.StatusCode = http.StatusTooManyRequests
-			logEntry.Error = fmt.Sprintf("budget exceeded: used %d + input %d > limit %d", usage, inputTokens, resolved.MaxTokens)
+			logEntry.Error = fmt.Sprintf("budget exceeded: used %d + input %d > limit %d", currentUsage, inputTokens, resolved.MaxTokens)
 			httpError(w, http.StatusTooManyRequests, logEntry.Error)
 			h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, 0, true)
 			return
 		}
+		reservedInput = int64(inputTokens)
 	}
+	defer func() {
+		if reservedInput > 0 && !committedInput {
+			h.releaseReservedInputBudget(tokenHash, reservedInput)
+		}
+	}()
 
 	// Update request body with injected messages
 	interfaceMessages := make([]interface{}, len(typedMessages))
@@ -381,6 +400,14 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				logEntry.Error = "failed to marshal request"
 				httpError(w, http.StatusInternalServerError, logEntry.Error)
 				return
+			}
+
+			// Compress request body if beneficial
+			var requestEncoding string
+			compressedBody, encoding, err := CompressRequestBody(newBody)
+			if err == nil && encoding != "" {
+				newBody = compressedBody
+				requestEncoding = encoding
 			}
 
 			// Resolve the real API key from env
@@ -468,6 +495,9 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			}
 
 			proxyReq.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
+			if requestEncoding != "" {
+				proxyReq.Header.Set("Content-Encoding", requestEncoding)
+			}
 			proxyReq.Header.Set("X-Client-Request-Id", clientRequestID)
 
 			upstreamStart := time.Now()
@@ -484,13 +514,15 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 			// Check if we should retry based on status code
 			if shouldRetry(resolved.Retry, resp.StatusCode) && (attempt < maxAttempts-1 || tryModel != modelsToTry[len(modelsToTry)-1]) {
-			// Discard response body without allocating; cap size to prevent abuse
-			io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBodySize))
-			resp.Body.Close()
-			cancel()
-			lastResp = resp
-			retryCount++
-			continue
+				// Discard response body without allocating; cap size to prevent abuse
+				if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBodySize)); err != nil {
+					debugLog("failed to discard retry response body: %v", err)
+				}
+				resp.Body.Close()
+				cancel()
+				lastResp = resp
+				retryCount++
+				continue
 			}
 
 			// Success or non-retryable error — use this response
@@ -503,15 +535,17 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			// Capture upstream provider request ID from response headers
 			logEntry.UpstreamRequestID = extractUpstreamRequestID(resp.Header)
 
-			h.sessions.AddUsage(tokenHash, int64(inputTokens))
-			h.emitter.Emit(r.Context(), events.New(events.BudgetUpdate, map[string]interface{}{
+			committedInput = true
+			if emitErr := h.emitter.Emit(r.Context(), events.New(events.BudgetUpdate, map[string]interface{}{
 				"token_hash": safePrefix(tokenHash, 16), "model": tryModel, "input_tokens": inputTokens,
-			}))
+			})); emitErr != nil {
+				debugLog("failed to emit budget update event: %v", emitErr)
+			}
 
 			// Record token usage for rate limiter
 			h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, inputTokens)
 
-// Record full request body to memory and ledger (before any modifications)
+			// Record full request body to memory and ledger (before any modifications)
 			reqBodyStr := string(bodyBytes)
 			if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
 				if err := memWriter.Append(tokenHash, "request", model, reqBodyStr); err != nil {
@@ -525,54 +559,52 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				}
 			}
 
-			// Collect user content for memory logging.
-			var userContent string
-			var parts []string
-			for _, m := range messages {
-				msg, ok := m.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				role, _ := msg["role"].(string)
-				content, _ := msg["content"].(string)
-				if content != "" && role == "user" {
-					parts = append(parts, content)
-				}
-			}
-			userContent = strings.Join(parts, "\n\n")
+			// Collect normalized user content for memory logging.
+			userContent := extractUserContent(messages)
 
 			if stream && resp.StatusCode == http.StatusOK {
-				outputTokens, assistantContent, rawStreamResponse, streamUpstreamID, streamLastChunk, streamTruncated := h.handleStreamingResponse(w, resp, tokenHash, tryModel)
+				outputTokens, assistantContent, streamUpstreamID, streamLastChunk, streamTruncated := h.handleStreamingResponse(w, resp, tokenHash, tryModel)
 				resp.Body.Close()
 
 				if streamTruncated {
-					debugLog("Streaming response capture truncated at %d bytes", maxResponseBodySize)
-				}
-				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
-					if err := memWriter.Append(tokenHash, "response", tryModel, string(rawStreamResponse)); err != nil {
-						debugLog("Failed to record response to memory: %v", err)
-					}
+					debugLog("Streaming assistant content capture truncated at %d bytes", maxMemoryContentSize)
 				}
 				logEntry.StatusCode = resp.StatusCode
 				logEntry.OutputTokens = outputTokens
 				logEntry.UpstreamID = streamUpstreamID
 				h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, outputTokens, false)
 				h.rateLimiter.RecordTokens(tokenHash, resolved.RateLimit, outputTokens)
-				h.emitter.Emit(r.Context(), events.New(events.RequestCompleted, map[string]interface{}{
+				if emitErr := h.emitter.Emit(r.Context(), events.New(events.RequestCompleted, map[string]interface{}{
 					"token_hash": safePrefix(tokenHash, 16), "model": tryModel, "stream": true,
 					"status_code": resp.StatusCode, "input_tokens": inputTokens, "output_tokens": outputTokens,
-				}))
+				})); emitErr != nil {
+					debugLog("failed to emit request completed event: %v", emitErr)
+				}
 
+				assistantForMemory := assistantContent
+				if assistantForMemory == "" {
+					assistantForMemory = "[Streaming response with no assistant content captured]"
+				}
+				if streamTruncated {
+					assistantForMemory += "\n\n[assistant content truncated for memory]"
+				}
 				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+					responseForMemory := assistantContent
+					if responseForMemory == "" {
+						responseForMemory = "[Streaming response with no assistant content captured]"
+					} else if streamTruncated {
+						responseForMemory += "\n\n[assistant content truncated for memory]"
+					}
+					if err := memWriter.Append(tokenHash, "response", tryModel, responseForMemory); err != nil {
+						debugLog("Failed to record response to memory: %v", err)
+					}
 					if userContent != "" {
 						if err := memWriter.Append(tokenHash, "user", tryModel, userContent); err != nil {
 							debugLog("Failed to record user to memory: %v", err)
 						}
 					}
-					if assistantContent != "" {
-						if err := memWriter.Append(tokenHash, "assistant", tryModel, assistantContent); err != nil {
+					if err := memWriter.Append(tokenHash, "assistant", tryModel, assistantForMemory); err != nil {
 							debugLog("Failed to record assistant to memory: %v", err)
-						}
 					}
 				}
 
@@ -582,10 +614,12 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 					extractProviderMetaFromStream(resp.Header, streamLastChunk))
 				if h.ledger != nil {
 					if userContent != "" {
-						h.ledger.RecordMemory(tokenHash, "user", tryModel, userContent)
+						if err := h.ledger.RecordMemory(tokenHash, "user", tryModel, userContent); err != nil {
+							debugLog("Failed to record user to ledger: %v", err)
+						}
 					}
-					if assistantContent != "" {
-						h.ledger.RecordMemory(tokenHash, "assistant", tryModel, assistantContent)
+					if err := h.ledger.RecordMemory(tokenHash, "assistant", tryModel, assistantForMemory); err != nil {
+							debugLog("Failed to record assistant to ledger: %v", err)
 					}
 				}
 				return
@@ -617,11 +651,13 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 			isError := resp.StatusCode >= 400
 			h.stats.Record(tokenHash, tryModel, resolved.BaseKeyEnv, inputTokens, outputTokens, isError)
-			h.emitter.Emit(r.Context(), events.New(events.RequestCompleted, map[string]interface{}{
+			if emitErr := h.emitter.Emit(r.Context(), events.New(events.RequestCompleted, map[string]interface{}{
 				"token_hash": safePrefix(tokenHash, 16), "model": tryModel, "stream": false,
 				"status_code": resp.StatusCode, "input_tokens": inputTokens, "output_tokens": outputTokens,
 				"error": isError,
-			}))
+			})); emitErr != nil {
+				debugLog("failed to emit request completed event: %v", emitErr)
+			}
 
 			var assistantContent string
 			if !isError {
@@ -639,10 +675,11 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 						}
 					}
 					assistantContent = extractAssistantContent(respBody)
-					if assistantContent != "" {
-						if err := memWriter.Append(tokenHash, "assistant", tryModel, assistantContent); err != nil {
-							debugLog("Failed to record assistant to memory: %v", err)
-						}
+					if assistantContent == "" {
+						assistantContent = formatResponseForMemory(respBody, resp.Header.Get("Content-Type"))
+					}
+					if err := memWriter.Append(tokenHash, "assistant", tryModel, assistantContent); err != nil {
+						debugLog("Failed to record assistant to memory: %v", err)
 					}
 				}
 			}
@@ -657,14 +694,18 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 				debugLog("Recording memory to ledger")
 				if userContent != "" {
 					debugLog("Recording user content: %d chars", len(userContent))
-					h.ledger.RecordMemory(tokenHash, "user", tryModel, userContent)
+					if err := h.ledger.RecordMemory(tokenHash, "user", tryModel, userContent); err != nil {
+						debugLog("Failed to record user to ledger: %v", err)
+					}
 				}
 				if assistantContent == "" {
 					assistantContent = extractAssistantContent(respBody)
 				}
 				if assistantContent != "" {
 					debugLog("Recording assistant content: %d chars", len(assistantContent))
-					h.ledger.RecordMemory(tokenHash, "assistant", tryModel, assistantContent)
+					if err := h.ledger.RecordMemory(tokenHash, "assistant", tryModel, assistantContent); err != nil {
+						debugLog("Failed to record assistant to ledger: %v", err)
+					}
 					// Record request and response to ledger
 					reqBodyStr := string(bodyBytes)
 					if err := h.ledger.RecordMemory(tokenHash, "request", tryModel, reqBodyStr); err != nil {
@@ -681,7 +722,9 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 
 			copyHeaders(resp.Header, w.Header())
 			w.WriteHeader(resp.StatusCode)
-			w.Write(respBody)
+			if _, err := w.Write(respBody); err != nil {
+				debugLog("failed writing buffered response to client: %v", err)
+			}
 			return
 		}
 	}
@@ -694,7 +737,9 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		h.stats.Record(tokenHash, model, resolved.BaseKeyEnv, inputTokens, 0, true)
 		copyHeaders(lastResp.Header, w.Header())
 		w.WriteHeader(lastResp.StatusCode)
-		w.Write(lastBody)
+		if _, err := w.Write(lastBody); err != nil {
+			debugLog("failed writing exhausted-retry response to client: %v", err)
+		}
 		return
 	}
 	logEntry.StatusCode = http.StatusBadGateway
@@ -722,12 +767,12 @@ func shouldRetry(cfg *policy.RetryConfig, statusCode int) bool {
 
 // handleStreamingResponse streams the upstream SSE response to the client,
 // counting output tokens and extracting the upstream completion ID.
-// Returns (outputTokens, assistantContent, rawResponse, upstreamID, lastChunk, truncated).
-func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string, []byte, string, map[string]interface{}, bool) {
+// Returns (outputTokens, assistantContent, upstreamID, lastChunk, truncated).
+func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Response, tokenHash, model string) (int, string, string, map[string]interface{}, bool) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		httpError(w, http.StatusInternalServerError, "streaming not supported")
-		return 0, "", nil, "", nil, false
+		return 0, "", "", nil, false
 	}
 
 	copyHeaders(resp.Header, w.Header())
@@ -737,12 +782,11 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 	w.WriteHeader(resp.StatusCode)
 
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64*1024), maxResponseBodySize)
 	var totalOutputTokens int
 	var contentBuilder strings.Builder
-	var rawResponse bytes.Buffer
 	var upstreamID string
 	var lastChunk map[string]interface{}
-	var capturedBytes int64
 	var truncated bool
 
 	for scanner.Scan() {
@@ -751,19 +795,6 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 		// Write the line through to the client
 		fmt.Fprintf(w, "%s\n", line)
 		flusher.Flush()
-
-		if capturedBytes < maxResponseBodySize {
-			rawLine := line + "\n"
-			remaining := int64(maxResponseBodySize) - capturedBytes
-			if int64(len(rawLine)) > remaining {
-				rawLine = rawLine[:remaining]
-				truncated = true
-			}
-			rawResponse.WriteString(rawLine)
-			capturedBytes += int64(len(rawLine))
-		} else {
-			truncated = true
-		}
 
 		// Parse SSE data lines for token counting
 		if strings.HasPrefix(line, "data: ") {
@@ -801,7 +832,17 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 					}
 					content, _ := delta["content"].(string)
 					if content != "" {
-						contentBuilder.WriteString(content)
+						remaining := maxMemoryContentSize - contentBuilder.Len()
+						if remaining > 0 {
+							if len(content) > remaining {
+								contentBuilder.WriteString(content[:remaining])
+								truncated = true
+							} else {
+								contentBuilder.WriteString(content)
+							}
+						} else {
+							truncated = true
+						}
 						n, err := tokencount.Count(model, content)
 						if err == nil {
 							totalOutputTokens += n
@@ -822,12 +863,17 @@ func (h *Handler) handleStreamingResponse(w http.ResponseWriter, resp *http.Resp
 			}
 		}
 	}
-
-	if totalOutputTokens > 0 {
-		h.sessions.AddUsage(tokenHash, int64(totalOutputTokens))
+	if err := scanner.Err(); err != nil {
+		debugLog("stream scanner error: %v", err)
 	}
 
-	return totalOutputTokens, contentBuilder.String(), rawResponse.Bytes(), upstreamID, lastChunk, truncated
+	if totalOutputTokens > 0 {
+		if _, err := h.sessions.AddUsage(tokenHash, int64(totalOutputTokens)); err != nil {
+			debugLog("failed to add streaming usage: %v", err)
+		}
+	}
+
+	return totalOutputTokens, contentBuilder.String(), upstreamID, lastChunk, truncated
 }
 
 func (h *Handler) countResponseTokens(body []byte, tokenHash string) int {
@@ -872,7 +918,9 @@ func (h *Handler) countResponseTokens(body []byte, tokenHash string) int {
 
 	debugLog("countResponseTokens: recording %d output tokens", int64(outputTokens))
 	if outputTokens > 0 {
-		h.sessions.AddUsage(tokenHash, int64(outputTokens))
+		if _, err := h.sessions.AddUsage(tokenHash, int64(outputTokens)); err != nil {
+			debugLog("failed to add response usage: %v", err)
+		}
 	}
 	return int(outputTokens)
 }
@@ -928,11 +976,64 @@ func (h *Handler) recordLedgerEntry(logEntry *RequestLog, tokenHash, model, prov
 	h.ledger.RecordRequest(entry)
 }
 
+func extractUserContent(messages []interface{}) string {
+	var parts []string
+	for _, m := range messages {
+		msg, ok := m.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		role, _ := msg["role"].(string)
+		if role != "user" {
+			continue
+		}
+
+		switch content := msg["content"].(type) {
+		case string:
+			if content != "" {
+				parts = append(parts, content)
+			}
+		case []interface{}:
+			for _, item := range content {
+				block, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if text, _ := block["text"].(string); text != "" {
+					parts = append(parts, text)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 func extractAssistantContent(body []byte) string {
 	var resp map[string]interface{}
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return ""
 	}
+
+	// Anthropic-style non-streaming response: {"content":[{"type":"text","text":"..."}], ...}
+	if contentArr, ok := resp["content"].([]interface{}); ok && len(contentArr) > 0 {
+		var b strings.Builder
+		for _, item := range contentArr {
+			block, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, _ := block["text"].(string); text != "" {
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(text)
+			}
+		}
+		if b.Len() > 0 {
+			return b.String()
+		}
+	}
+
 	choices, ok := resp["choices"].([]interface{})
 	if !ok || len(choices) == 0 {
 		return ""
@@ -980,13 +1081,8 @@ func formatResponseForMemory(body []byte, contentType string) string {
 	// Try to parse as JSON (most API responses are JSON)
 	var resp map[string]interface{}
 	if err := json.Unmarshal(body, &resp); err != nil {
-		// Not JSON, return sanitized version of raw response
-		// Don't return binary/garbled data, just indicate it's non-JSON
-		str := string(body)
-		if len(str) > 500 {
-			return fmt.Sprintf("[Non-JSON response, %d bytes]\n\n%s...", len(body), str[:500])
-		}
-		return fmt.Sprintf("[Non-JSON response]\n\n%s", str)
+		// For non-JSON payloads, persist the raw content as-is.
+		return string(body)
 	}
 
 	// Extract common response fields
@@ -1000,6 +1096,26 @@ func formatResponseForMemory(body []byte, contentType string) string {
 	}
 
 	// Extract assistant content if available
+	if contentArr, ok := resp["content"].([]interface{}); ok && len(contentArr) > 0 {
+		var b strings.Builder
+		for _, item := range contentArr {
+			block, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, ok := block["text"].(string); ok && text != "" {
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(text)
+			}
+		}
+		if b.Len() > 0 {
+			return b.String()
+		}
+	}
+
+	// OpenAI-compatible content shape.
 	if choices, ok := resp["choices"].([]interface{}); ok && len(choices) > 0 {
 		choice := choices[0]
 		if choiceMap, ok := choice.(map[string]interface{}); ok {
@@ -1018,27 +1134,45 @@ func formatResponseForMemory(body []byte, contentType string) string {
 		}
 	}
 
-	// If we got JSON but couldn't extract content, return a summary
-	result.WriteString(fmt.Sprintf("[API Response: %d bytes]\n\n", len(body)))
+	// If we got JSON but couldn't extract assistant text, keep a compact summary.
+	result.WriteString(string(body))
+	return result.String()
+}
 
-	// Pretty-print the JSON (truncated)
-	prettyJSON, err := json.MarshalIndent(resp, "", "  ")
-	if err == nil && len(prettyJSON) > 0 {
-		str := string(prettyJSON)
-		if len(str) > 1000 {
-			result.WriteString(str[:1000])
-			result.WriteString("\n...[truncated]")
-		} else {
-			result.WriteString(str)
+func (h *Handler) reserveInputBudget(tokenHash string, inputTokens, maxTokens int64) (int64, error) {
+	h.budgetMu.Lock()
+	defer h.budgetMu.Unlock()
+
+	currentUsage, err := h.sessions.GetUsage(tokenHash)
+	if err != nil {
+		return currentUsage, err
+	}
+	if currentUsage+inputTokens > maxTokens {
+		return currentUsage, fmt.Errorf("budget exceeded")
+	}
+	if inputTokens > 0 {
+		if _, err := h.sessions.AddUsage(tokenHash, inputTokens); err != nil {
+			return currentUsage, err
 		}
 	}
-	return result.String()
+	return currentUsage, nil
+}
+
+func (h *Handler) releaseReservedInputBudget(tokenHash string, reservedInput int64) {
+	h.budgetMu.Lock()
+	defer h.budgetMu.Unlock()
+	if reservedInput <= 0 {
+		return
+	}
+	if _, err := h.sessions.AddUsage(tokenHash, -reservedInput); err != nil {
+		debugLog("failed to release reserved input budget: %v", err)
+	}
 }
 
 // emitOpenClawEvent emits webhook events for OpenClaw agent requests.
 // Emits on agent request, success, error, or rule violations.
 func (h *Handler) emitOpenClawEvent(ctx context.Context, eventType string, metadata map[string]string, statusCode int, model string, tokenHash string, errorMsg string) {
-	if metadata == nil || len(metadata) == 0 {
+	if len(metadata) == 0 {
 		return // No OpenClaw metadata, skip event
 	}
 
@@ -1060,5 +1194,7 @@ func (h *Handler) emitOpenClawEvent(ctx context.Context, eventType string, metad
 		data["error"] = errorMsg
 	}
 
-	h.emitter.Emit(ctx, events.New(eventType, data))
+	if err := h.emitter.Emit(ctx, events.New(eventType, data)); err != nil {
+		debugLog("failed to emit OpenClaw event %s: %v", eventType, err)
+	}
 }

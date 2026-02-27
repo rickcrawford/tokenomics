@@ -1,6 +1,6 @@
 # Features
 
-Complete feature reference for Tokenomics, organized by category. Every feature listed here is implemented, tested, and production-ready.
+Complete feature reference for Tokenomics, organized by category.
 
 ## Cost Control
 
@@ -28,7 +28,7 @@ Complete feature reference for Tokenomics, organized by category. Every feature 
 | Feature | Description | Docs |
 |---------|-------------|------|
 | Model-based routing | Single wrapper token routes to any provider based on the requested model name. The proxy resolves API key, upstream URL, auth scheme, and headers automatically. | [Multi-Model Routing](MULTI_MODEL_ROUTING.md) |
-| 17+ providers | Pre-configured: OpenAI, Anthropic, Azure OpenAI, Google Gemini, Vertex AI, Groq, Mistral, Cohere, Perplexity, DeepSeek, Together AI, Fireworks AI, xAI, OpenRouter, Replicate, Ollama, vLLM, LiteLLM. | [Policies](POLICIES.md#provider-configuration-file) |
+| Built-in providers | Built-in defaults: OpenAI, generic, Anthropic, Azure, Gemini, Groq, Mistral, DeepSeek, and Ollama. Additional providers can be added in `providers.yaml`. | [Policies](POLICIES.md#provider-configuration-file) |
 | Auth schemes | Bearer token, custom header (`x-api-key`), query parameter (`?key=`). Configured per provider. | [Multi-Model Routing](MULTI_MODEL_ROUTING.md#auth-schemes) |
 | Custom headers | Per-provider headers (e.g., `anthropic-version`) added automatically to upstream requests. | [Policies](POLICIES.md#provider-config-fields) |
 | Custom chat paths | Per-provider endpoint overrides (e.g., `/v1/messages` for Anthropic). | [Policies](POLICIES.md#provider-config-fields) |
@@ -61,7 +61,7 @@ Complete feature reference for Tokenomics, organized by category. Every feature 
 |---------|-------------|------|
 | Structured logging | JSON logs per request with token counts, latency, model, upstream IDs, rule matches, retry counts, and cost metadata. | [Stats & Logging](STATS_AND_LOGGING.md#request-logging) |
 | Log controls | Configure log level, format (JSON/text), request/response body logging, token hash masking, and per-request log suppression. | [Configuration](CONFIGURATION.md#logging) |
-| File logging | Write logs to a file via `TOKENOMICS_LOG_FILE` environment variable. | [Configuration](CONFIGURATION.md#file-output) |
+| File logging | Write logs to a file via `logging.file.*` config fields (or matching `TOKENOMICS_LOGGING_FILE_*` env vars). | [Configuration](CONFIGURATION.md#logging) |
 | /stats endpoint | Aggregated usage: global totals, by model+key, and by token. Available on both HTTP and HTTPS. | [Stats & Logging](STATS_AND_LOGGING.md#stats-endpoint) |
 | /health endpoint | Returns `{"status":"ok"}` for health checks. | [Stats & Logging](STATS_AND_LOGGING.md#notes) |
 | /ping endpoint | Returns 200 OK heartbeat. | [Stats & Logging](STATS_AND_LOGGING.md#notes) |
@@ -163,7 +163,7 @@ Complete feature reference for Tokenomics, organized by category. Every feature 
 | YAML config | `config.yaml` from current directory or `$HOME/.tokenomics/`. Custom path via `--config`. | [Configuration](CONFIGURATION.md#config-file) |
 | Environment overrides | Every config field maps to a `TOKENOMICS_` prefixed env var. | [Configuration](CONFIGURATION.md#environment-variables) |
 | .env file | Auto-loads `.env` from current directory or `$HOME/.tokenomics/`. | [Agent Integration](AGENT_INTEGRATION.md#using-env-file) |
-| Providers file | Separate `providers.yaml` with 17+ pre-configured providers. | [Policies](POLICIES.md#provider-configuration-file) |
+| Providers file | Separate `providers.yaml` merged over built-in provider defaults. | [Policies](POLICIES.md#provider-configuration-file) |
 | CLI maps | Map CLI tool names to providers for auto-detection in `tokenomics run`. | [Agent Integration](AGENT_INTEGRATION.md#auto-detection-cli-maps) |
 | Priority order | CLI flags > environment variables > config file > defaults. | [Configuration](CONFIGURATION.md) |
 

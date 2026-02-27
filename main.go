@@ -19,7 +19,7 @@ func init() {
 	}
 
 	for _, envFile := range candidates {
-		godotenv.Load(envFile)
+		_ = godotenv.Load(envFile)
 	}
 }
 

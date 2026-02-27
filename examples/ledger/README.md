@@ -17,7 +17,6 @@ This directory contains example files for the session ledger feature.
 ```yaml
 ledger:
   enabled: true
-  dir: ".tokenomics"
   memory: true
 ```
 

@@ -8,7 +8,9 @@ func BenchmarkParse_Simple(b *testing.B) {
 	data := `{"base_key_env":"OPENAI_API_KEY","max_tokens":100000}`
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Parse(data)
+		if _, err := Parse(data); err != nil {
+			b.Fatalf("parse failed: %v", err)
+		}
 	}
 }
 
@@ -26,7 +28,9 @@ func BenchmarkParse_MultiProvider(b *testing.B) {
 	}`
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		Parse(data)
+		if _, err := Parse(data); err != nil {
+			b.Fatalf("parse failed: %v", err)
+		}
 	}
 }
 
@@ -75,7 +79,9 @@ func BenchmarkCheckModel_Allowed(b *testing.B) {
 	resolved := pol.ResolveForModel("gpt-4o")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		resolved.CheckModel("gpt-4o")
+		if err := resolved.CheckModel("gpt-4o"); err != nil {
+			b.Fatalf("check model failed: %v", err)
+		}
 	}
 }
 
@@ -84,7 +90,9 @@ func BenchmarkCheckModel_Blocked(b *testing.B) {
 	resolved := pol.ResolveForModel("gpt-4o")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		resolved.CheckModel("claude-3-opus")
+		if err := resolved.CheckModel("claude-3-opus"); err == nil {
+			b.Fatal("expected model to be blocked")
+		}
 	}
 }
 
@@ -93,7 +101,9 @@ func BenchmarkCheckRules_NoRules(b *testing.B) {
 	resolved := pol.ResolveForModel("gpt-4o")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		resolved.CheckRules("some user input text", "input")
+		if _, err := resolved.CheckRules("some user input text", "input"); err != nil {
+			b.Fatalf("check rules failed: %v", err)
+		}
 	}
 }
 
@@ -102,7 +112,9 @@ func BenchmarkCheckRules_KeywordMatch(b *testing.B) {
 	resolved := pol.ResolveForModel("gpt-4o")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		resolved.CheckRules("please help me reset my password", "input")
+		if _, err := resolved.CheckRules("please help me reset my password", "input"); err != nil {
+			b.Fatalf("check rules failed: %v", err)
+		}
 	}
 }
 
@@ -111,7 +123,9 @@ func BenchmarkCheckRules_KeywordNoMatch(b *testing.B) {
 	resolved := pol.ResolveForModel("gpt-4o")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		resolved.CheckRules("how do I sort a list in python?", "input")
+		if _, err := resolved.CheckRules("how do I sort a list in python?", "input"); err != nil {
+			b.Fatalf("check rules failed: %v", err)
+		}
 	}
 }
 
@@ -120,7 +134,9 @@ func BenchmarkCheckRules_PII(b *testing.B) {
 	resolved := pol.ResolveForModel("gpt-4o")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		resolved.CheckRules("my email is user@example.com and SSN is 123-45-6789", "input")
+		if _, err := resolved.CheckRules("my email is user@example.com and SSN is 123-45-6789", "input"); err != nil {
+			b.Fatalf("check rules failed: %v", err)
+		}
 	}
 }
 

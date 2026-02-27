@@ -52,9 +52,15 @@ func BenchmarkOutputShell(b *testing.B) {
 	defer f.Close()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		f.Seek(0, 0)
-		f.Truncate(0)
-		OutputShell(pairs, f)
+		if _, err := f.Seek(0, 0); err != nil {
+			b.Fatalf("seek failed: %v", err)
+		}
+		if err := f.Truncate(0); err != nil {
+			b.Fatalf("truncate failed: %v", err)
+		}
+		if err := OutputShell(pairs, f); err != nil {
+			b.Fatalf("output shell failed: %v", err)
+		}
 	}
 }
 
@@ -68,19 +74,25 @@ func BenchmarkHashToken(b *testing.B) {
 
 func BenchmarkParseExpires_Duration(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		parseExpires("24h")
+		if _, err := parseExpires("24h"); err != nil {
+			b.Fatalf("parse expires failed: %v", err)
+		}
 	}
 }
 
 func BenchmarkParseExpires_Days(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		parseExpires("30d")
+		if _, err := parseExpires("30d"); err != nil {
+			b.Fatalf("parse expires failed: %v", err)
+		}
 	}
 }
 
 func BenchmarkParseExpires_RFC3339(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		parseExpires("2025-12-31T23:59:59Z")
+		if _, err := parseExpires("2025-12-31T23:59:59Z"); err != nil {
+			b.Fatalf("parse expires failed: %v", err)
+		}
 	}
 }
 

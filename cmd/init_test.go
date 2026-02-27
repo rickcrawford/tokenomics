@@ -415,8 +415,14 @@ func TestWriteClaudeCodeConfig(t *testing.T) {
 	// Create a temp directory to act as the working directory
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
 
 	pairs := []EnvPair{
 		{"ANTHROPIC_API_KEY", "tkn_test123"},
@@ -456,13 +462,23 @@ func TestWriteClaudeCodeConfig(t *testing.T) {
 func TestWriteClaudeCodeConfig_MergesExistingSettings(t *testing.T) {
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
 
 	// Write existing settings
-	os.MkdirAll(".claude", 0o755)
+	if err := os.MkdirAll(".claude", 0o755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
 	existing := `{"allowedTools": ["Bash"], "customField": true}`
-	os.WriteFile(".claude/settings.local.json", []byte(existing), 0o644)
+	if err := os.WriteFile(".claude/settings.local.json", []byte(existing), 0o644); err != nil {
+		t.Fatalf("write existing settings: %v", err)
+	}
 
 	pairs := []EnvPair{
 		{"OPENAI_API_KEY", "tkn_abc"},
@@ -507,8 +523,14 @@ func TestWriteClaudeCodeConfig_MergesExistingSettings(t *testing.T) {
 func TestWriteClaudeCodeConfig_CreatesDirectory(t *testing.T) {
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	}()
 
 	pairs := []EnvPair{{"KEY", "VAL"}}
 	err := writeClaudeCodeConfig(pairs, "https://localhost:8443")

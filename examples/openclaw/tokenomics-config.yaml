@@ -85,7 +85,6 @@ default_provider: openai
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ledger:
   enabled: true                           # Enable session recording
-  # dir: ""                                # Relative or absolute path (empty = derive from dir)
   memory: true                            # Record conversation content in memory/
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -107,7 +106,7 @@ events:
     #   events:
     #     - "rule.violation"
     #     - "budget.exceeded"
-    #     - "rate.limit.hit"
+    #     - "rate.exceeded"
 
     # Optional: Audit webhook for token lifecycle events
     # - url: "https://audit.example.com/tokenomics"

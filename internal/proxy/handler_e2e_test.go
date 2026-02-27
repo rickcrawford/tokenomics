@@ -24,11 +24,13 @@ func TestE2E_FullRequestFlow(t *testing.T) {
 		upstreamBody = string(body)
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Request-Id", "req-abc123")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-e2e",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"role": "assistant", "content": "Hello there!"}}},
 			"usage":   map[string]interface{}{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -40,7 +42,9 @@ func TestE2E_FullRequestFlow(t *testing.T) {
 			{Role: "system", Content: "You are helpful."},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_e2e"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -63,7 +67,9 @@ func TestE2E_FullRequestFlow(t *testing.T) {
 
 	// Verify response passes through
 	var resp map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&resp)
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
 	if resp["id"] != "chatcmpl-e2e" {
 		t.Errorf("expected response id chatcmpl-e2e, got %v", resp["id"])
 	}
@@ -84,7 +90,9 @@ func TestE2E_RuleViolationBlocks(t *testing.T) {
 			{Type: "keyword", Keywords: []string{"drop table"}, Action: "fail"},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_rule"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -110,11 +118,13 @@ func TestE2E_PiiMaskingRedactsContent(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		upstreamBody = string(body)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-pii",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -124,7 +134,9 @@ func TestE2E_PiiMaskingRedactsContent(t *testing.T) {
 			{Type: "pii", Detect: []string{"ssn", "credit_card"}, Action: "mask", Scope: "input"},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_pii"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -166,12 +178,16 @@ func TestE2E_BudgetExceeded(t *testing.T) {
 		BaseKeyEnv: "BUDGET_KEY",
 		MaxTokens:  1, // 1 token budget
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	tokenHash := hashForTest(handler, "tkn_budget")
 	ts.Save(tokenHash, pol)
 
 	// Seed usage so it's already over budget
-	handler.sessions.AddUsage(tokenHash, 100)
+	if _, err := handler.sessions.AddUsage(tokenHash, 100); err != nil {
+		t.Fatalf("seed session usage: %v", err)
+	}
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
 		`{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}`,
@@ -203,7 +219,9 @@ func TestE2E_ModelRejection(t *testing.T) {
 		BaseKeyEnv: "MODEL_KEY",
 		ModelRegex: "^gpt-3",
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_model"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -226,11 +244,13 @@ func TestE2E_RateLimiting(t *testing.T) {
 
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-rate",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -242,7 +262,9 @@ func TestE2E_RateLimiting(t *testing.T) {
 			},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_rate"), pol)
 
 	makeReq := func() int {
@@ -296,11 +318,13 @@ func TestE2E_MultiProvider(t *testing.T) {
 		}
 		capturedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-multi",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "hi"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
@@ -310,7 +334,9 @@ func TestE2E_MultiProvider(t *testing.T) {
 			"anthropic": {{BaseKeyEnv: "ANTHROPIC_E2E_KEY", ModelRegex: "^claude"}},
 		},
 	}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_multi"), pol)
 
 	// Test OpenAI routing
@@ -355,18 +381,22 @@ func TestE2E_LoggingDisabled(t *testing.T) {
 
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-log",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 1},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	handler.SetLogging(config.LoggingConfig{DisableRequest: true})
 
 	pol := &policy.Policy{BaseKeyEnv: "LOG_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_log"), pol)
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
@@ -389,16 +419,20 @@ func TestE2E_StatsEndpoint(t *testing.T) {
 
 	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"id":      "chatcmpl-stats",
 			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "ok"}}},
 			"usage":   map[string]interface{}{"completion_tokens": 5},
-		})
+		}); err != nil {
+			t.Fatalf("encode upstream response: %v", err)
+		}
 	})
 	defer upstream.Close()
 
 	pol := &policy.Policy{BaseKeyEnv: "STATS_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	ts.Save(hashForTest(handler, "tkn_stats"), pol)
 
 	// Make a request
@@ -424,7 +458,9 @@ func TestE2E_StatsEndpoint(t *testing.T) {
 	}
 
 	var stats map[string]interface{}
-	json.NewDecoder(statsRR.Body).Decode(&stats)
+	if err := json.NewDecoder(statsRR.Body).Decode(&stats); err != nil {
+		t.Fatalf("decode stats response: %v", err)
+	}
 
 	totals, ok := stats["totals"].(map[string]interface{})
 	if !ok {
@@ -441,7 +477,9 @@ func TestE2E_RemoteSync(t *testing.T) {
 	// then uses a client to sync tokens to a different store.
 	remoteStore := newMockTokenStore()
 	pol := &policy.Policy{BaseKeyEnv: "TEST_KEY"}
-	pol.Validate()
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
 	remoteStore.Save("hash-remote-1", pol)
 
 	// Start a mock store for the remote server

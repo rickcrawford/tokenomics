@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -160,7 +161,14 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 		},
 	}
 
-	proxy.ServeHTTP(streamWriter, r)
+	timeout := 30 * time.Second
+	if resolved.Timeout > 0 {
+		timeout = time.Duration(resolved.Timeout) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	proxy.ServeHTTP(streamWriter, r.WithContext(ctx))
 	logEntry.StatusCode = lw.statusCode
 
 	// Extract token counts and response content
@@ -199,15 +207,18 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 	}
 
 	if model != "" {
-		responseForMemory := formatResponseForMemory(responseData, "")
+		assistantForMemory := assistantContent
+		if assistantForMemory == "" {
+			assistantForMemory = formatResponseForMemory(responseData, "")
+		}
 		if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
 			if len(requestBody) > 0 {
 				if err := memWriter.Append(tokenHash, "request", model, string(requestBody)); err != nil {
 					debugLog("Passthrough: failed to write request memory: %v", err)
 				}
 			}
-			if responseForMemory != "" {
-				if err := memWriter.Append(tokenHash, "response", model, responseForMemory); err != nil {
+			if assistantForMemory != "" {
+				if err := memWriter.Append(tokenHash, "response", model, assistantForMemory); err != nil {
 					debugLog("Passthrough: failed to write response memory: %v", err)
 				}
 			}
@@ -216,8 +227,8 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 					debugLog("Passthrough: failed to write user memory: %v", err)
 				}
 			}
-			if assistantContent != "" {
-				if err := memWriter.Append(tokenHash, "assistant", model, assistantContent); err != nil {
+			if assistantForMemory != "" {
+				if err := memWriter.Append(tokenHash, "assistant", model, assistantForMemory); err != nil {
 					debugLog("Passthrough: failed to write assistant memory: %v", err)
 				}
 			}
@@ -225,16 +236,24 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 
 		if h.ledger != nil {
 			if len(requestBody) > 0 {
-				h.ledger.RecordMemory(tokenHash, "request", model, string(requestBody))
+				if err := h.ledger.RecordMemory(tokenHash, "request", model, string(requestBody)); err != nil {
+					debugLog("Passthrough: failed to record request in ledger: %v", err)
+				}
 			}
-			if responseForMemory != "" {
-				h.ledger.RecordMemory(tokenHash, "response", model, responseForMemory)
+			if assistantForMemory != "" {
+				if err := h.ledger.RecordMemory(tokenHash, "response", model, assistantForMemory); err != nil {
+					debugLog("Passthrough: failed to record response in ledger: %v", err)
+				}
 			}
 			if userContent != "" {
-				h.ledger.RecordMemory(tokenHash, "user", model, userContent)
+				if err := h.ledger.RecordMemory(tokenHash, "user", model, userContent); err != nil {
+					debugLog("Passthrough: failed to record user in ledger: %v", err)
+				}
 			}
-			if assistantContent != "" {
-				h.ledger.RecordMemory(tokenHash, "assistant", model, assistantContent)
+			if assistantForMemory != "" {
+				if err := h.ledger.RecordMemory(tokenHash, "assistant", model, assistantForMemory); err != nil {
+					debugLog("Passthrough: failed to record assistant in ledger: %v", err)
+				}
 			}
 		}
 	}

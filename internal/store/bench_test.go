@@ -18,7 +18,9 @@ func BenchmarkEncrypt(b *testing.B) {
 	data := []byte(`{"base_key_env":"OPENAI_API_KEY","max_tokens":100000,"model_regex":"^gpt"}`)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		encrypt(data, key)
+		if _, err := encrypt(data, key); err != nil {
+			b.Fatalf("encrypt failed: %v", err)
+		}
 	}
 }
 
@@ -28,7 +30,9 @@ func BenchmarkDecrypt(b *testing.B) {
 	encrypted, _ := encrypt(data, key)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		decrypt(encrypted, key)
+		if _, err := decrypt(encrypted, key); err != nil {
+			b.Fatalf("decrypt failed: %v", err)
+		}
 	}
 }
 
@@ -50,7 +54,9 @@ func BenchmarkBoltStore_Lookup(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		s.Lookup("benchhash123")
+		if _, err := s.Lookup("benchhash123"); err != nil {
+			b.Fatalf("lookup failed: %v", err)
+		}
 	}
 }
 
@@ -66,7 +72,9 @@ func BenchmarkBoltStore_Lookup_Miss(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		s.Lookup("nonexistent-hash")
+		if _, err := s.Lookup("nonexistent-hash"); err != nil {
+			b.Fatalf("lookup failed: %v", err)
+		}
 	}
 }
 
@@ -84,7 +92,9 @@ func BenchmarkBoltStore_Create(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		s.Create(fmt.Sprintf("hash-%d", i), polJSON, "")
+		if err := s.Create(fmt.Sprintf("hash-%d", i), polJSON, ""); err != nil {
+			b.Fatalf("create failed: %v", err)
+		}
 	}
 }
 
@@ -100,12 +110,16 @@ func BenchmarkBoltStore_Reload(b *testing.B) {
 
 	// Seed with tokens
 	for i := 0; i < 100; i++ {
-		s.Create(fmt.Sprintf("hash-%d", i), `{"base_key_env":"KEY"}`, "")
+		if err := s.Create(fmt.Sprintf("hash-%d", i), `{"base_key_env":"KEY"}`, ""); err != nil {
+			b.Fatalf("seed create failed: %v", err)
+		}
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		s.Reload()
+		if err := s.Reload(); err != nil {
+			b.Fatalf("reload failed: %v", err)
+		}
 	}
 }
 
@@ -208,8 +222,12 @@ func TestBoltStore_Reload(t *testing.T) {
 	}
 	defer s.Close()
 
-	s.Create("hash-1", `{"base_key_env":"KEY1"}`, "")
-	s.Create("hash-2", `{"base_key_env":"KEY2"}`, "")
+	if err := s.Create("hash-1", `{"base_key_env":"KEY1"}`, ""); err != nil {
+		t.Fatalf("create hash-1: %v", err)
+	}
+	if err := s.Create("hash-2", `{"base_key_env":"KEY2"}`, ""); err != nil {
+		t.Fatalf("create hash-2: %v", err)
+	}
 
 	if err := s.Reload(); err != nil {
 		t.Fatal(err)

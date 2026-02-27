@@ -1,33 +1,34 @@
 # Session Ledger
 
-The session ledger records token usage, provider metadata, and conversation memory to a `.tokenomics/` directory in your project. Session files are committed alongside code, enabling per-feature and per-branch cost analysis.
+The session ledger records token usage, provider metadata, and conversation memory under your configured `dir` (default `~/.tokenomics`).
 
 ## Enable
 
 ```yaml
 # config.yaml
+dir: "~/.tokenomics"    # base directory (default)
 ledger:
-  enabled: true
-  dir: ".tokenomics"   # default
-  memory: true          # record conversation content
+  enabled: true         # enable session ledger (default)
+  memory: true          # record conversation content (default)
 ```
 
 Or via environment variables:
 
 ```bash
 export TOKENOMICS_LEDGER_ENABLED=true
-export TOKENOMICS_LEDGER_DIR=".tokenomics"
 export TOKENOMICS_LEDGER_MEMORY=true
 ```
+
+Note: The ledger directory is determined by the `dir` setting and cannot be overridden. Session files and memory logs are stored under `{dir}/sessions/` and `{dir}/memory/` respectively.
 
 ## Folder Structure
 
 ```
-.tokenomics/
-  sessions/
-    2026-02-25_a1b2c3d4.json     # one file per proxy session
-  memory/
-    2026-02-25_a1b2c3d4.md       # conversation log (optional)
+~/.tokenomics/              # default base directory
+├── sessions/
+│   └── 2026-02-25_a1b2c3d4.json     # one file per proxy session
+└── memory/
+    └── 2026-02-25_a1b2c3d4.md       # conversation log (if enabled)
 ```
 
 Session files use `<YYYY-MM-DD>_<session-id>.json` naming. Session ID is an 8-char hex generated at proxy startup.
@@ -40,7 +41,7 @@ Memory files live in a separate directory so teams can `.gitignore` them indepen
 2. Every proxied request is recorded with token counts, provider metadata, and timing
 3. Conversation content (user/assistant) is optionally written to a memory markdown file
 4. On shutdown, the ledger computes rollups and writes the session JSON
-5. Commit `.tokenomics/` alongside your code changes
+5. Optionally commit session artifacts if your workflow tracks usage in git
 
 ## Session JSON Format
 

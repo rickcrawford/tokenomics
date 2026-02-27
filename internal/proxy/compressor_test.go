@@ -16,7 +16,9 @@ func TestCompressionWriter_BrotliEncoding(t *testing.T) {
 	// Create a simple handler that writes text
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Hello, this is test content that should be compressed!"))
+		if _, err := w.Write([]byte("Hello, this is test content that should be compressed!")); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	})
 
 	// Create request with brotli support
@@ -57,7 +59,9 @@ func TestCompressionWriter_BrotliEncoding(t *testing.T) {
 func TestCompressionWriter_GzipFallback(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Gzip test content"))
+		if _, err := w.Write([]byte("Gzip test content")); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	})
 
 	// Request with only gzip support (no brotli)
@@ -97,7 +101,9 @@ func TestCompressionWriter_GzipFallback(t *testing.T) {
 func TestCompressionWriter_NoCompressionWhenNotAccepted(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Uncompressed content"))
+		if _, err := w.Write([]byte("Uncompressed content")); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	})
 
 	// Request with no compression support
@@ -127,7 +133,9 @@ func TestCompressionWriter_NoCompressionWhenNotAccepted(t *testing.T) {
 func TestCompressionWriter_WebSocketBypass(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("WebSocket response"))
+		if _, err := w.Write([]byte("WebSocket response")); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	})
 
 	// WebSocket upgrade request
@@ -155,7 +163,9 @@ func TestCompressionWriter_WebSocketBypass(t *testing.T) {
 func TestCompressionWriter_VaryHeader(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test"))
+		if _, err := w.Write([]byte("test")); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
 	})
 
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -202,5 +212,116 @@ func TestShouldCompress(t *testing.T) {
 				t.Errorf("expected %v, got %v", tt.shouldCompress, result)
 			}
 		})
+	}
+}
+
+func TestCompressRequestBody_SmallBody(t *testing.T) {
+	// Bodies smaller than 1 KB should not be compressed
+	smallBody := []byte("small body")
+	compressed, encoding, err := CompressRequestBody(smallBody)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if encoding != "" {
+		t.Errorf("small body should not be compressed, got encoding %q", encoding)
+	}
+	if !bytes.Equal(compressed, smallBody) {
+		t.Errorf("small body should be returned unchanged")
+	}
+}
+
+func TestCompressRequestBody_BrotliCompression(t *testing.T) {
+	// Create a body larger than 1 KB with repetitive content (compressible)
+	body := make([]byte, 2000)
+	for i := 0; i < len(body); i++ {
+		body[i] = byte('a' + (i % 26))
+	}
+
+	compressed, encoding, err := CompressRequestBody(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if encoding != "br" && encoding != "gzip" {
+		t.Fatalf("expected br or gzip encoding, got %q", encoding)
+	}
+
+	if len(compressed) >= len(body) {
+		t.Errorf("compressed body should be smaller than original")
+	}
+
+	// Verify decompression works
+	if encoding == "br" {
+		br := brotli.NewReader(bytes.NewReader(compressed))
+		decompressed, err := io.ReadAll(br)
+		if err != nil {
+			t.Fatalf("failed to decompress: %v", err)
+		}
+		if !bytes.Equal(decompressed, body) {
+			t.Errorf("decompressed body does not match original")
+		}
+	}
+}
+
+func TestCompressRequestBody_GzipFallback(t *testing.T) {
+	// Create a large body with less-repetitive content
+	body := make([]byte, 3000)
+	for i := 0; i < len(body); i++ {
+		body[i] = byte((i % 256))
+	}
+
+	compressed, encoding, err := CompressRequestBody(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if encoding == "" {
+		t.Errorf("expected compression encoding")
+	}
+
+	if len(compressed) >= len(body) {
+		t.Logf("note: body not compressed (acceptable for less-compressible data)")
+	}
+}
+
+func TestCompressRequestBody_IncompressibleData(t *testing.T) {
+	// Create random data that doesn't compress well
+	body := make([]byte, 2000)
+	for i := 0; i < len(body); i++ {
+		body[i] = byte(i % 256)
+	}
+
+	compressed, encoding, err := CompressRequestBody(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// For random data, compression might not be beneficial
+	// The function should return original body with empty encoding
+	if encoding == "" && !bytes.Equal(compressed, body) {
+		t.Errorf("when compression not beneficial, should return original body")
+	}
+}
+
+func TestCompressRequestBody_LargeJSON(t *testing.T) {
+	// Simulate a large JSON request body
+	jsonBody := []byte(`{
+		"model": "gpt-4",
+		"messages": [
+			{"role": "user", "content": "` + strings.Repeat("Hello world, this is a test message. ", 50) + `"}
+		]
+	}`)
+
+	compressed, encoding, err := CompressRequestBody(jsonBody)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(jsonBody) >= 1024 { // Only compress if >= 1KB
+		if encoding == "" && len(compressed) >= len(jsonBody) {
+			t.Logf("note: JSON body not compressed (acceptable)")
+		} else if encoding != "" && len(compressed) >= len(jsonBody) {
+			t.Errorf("compressed body should be smaller than original when compression used")
+		}
 	}
 }

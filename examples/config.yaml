@@ -1,7 +1,7 @@
 # Tokenomics Configuration
 #
 # Copy this file to the project root as config.yaml and adjust for your environment.
-# All values shown are defaults unless noted otherwise.
+# Values shown here are example settings.
 
 server:
   http_port: 8080
@@ -11,12 +11,12 @@ server:
   tls:
     enabled: true
     auto_gen: true       # Auto-generate a self-signed cert on startup
-    cert_dir: ./certs    # Where auto-generated certs are stored
+    cert_dir: ./certs    # Example path. If empty, resolves under configured dir.
     # cert_file: ""      # Path to custom TLS cert (disables auto_gen)
     # key_file: ""       # Path to custom TLS key
 
 storage:
-  db_path: ./tokenomics.db   # BoltDB file for token storage
+  db_path: ./tokenomics.db   # Example path. If empty, resolves under configured dir.
 
 session:
   backend: memory             # "memory" or "redis"
@@ -36,7 +36,7 @@ logging:
   request_body: false        # Log full request bodies (careful in production)
   response_body: false       # Log full response bodies
   hide_token_hash: false     # Mask token hashes with **** in logs
-  disable_request: false     # Suppress per-request structured log lines
+  disable_request: false     # Enable per-request structured log lines (default is true)
 
 # ── Remote Token Sync ─────────────────────────────────────────────────
 #
@@ -61,7 +61,6 @@ logging:
 #
 # ledger:
 #   enabled: true
-#   dir: ".tokenomics"          # Directory for session files
 #   memory: true                # Record conversation content in memory/*.md
 
 # ── Webhook Events ──────────────────────────────────────────────────────

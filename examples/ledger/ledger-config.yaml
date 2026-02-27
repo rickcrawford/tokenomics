@@ -7,5 +7,4 @@ server:
 
 ledger:
   enabled: true
-  dir: ".tokenomics"    # Session files go to .tokenomics/sessions/
   memory: true           # Conversation content goes to .tokenomics/memory/

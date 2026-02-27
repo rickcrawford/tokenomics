@@ -94,13 +94,21 @@ type Config struct {
 
 // LoggingConfig controls request and event logging behavior.
 type LoggingConfig struct {
-	Level          string `mapstructure:"level"`           // "debug", "info" (default), "warn", "error"
-	Format         string `mapstructure:"format"`          // "json" (default), "text"
-	RequestBody    bool   `mapstructure:"request_body"`    // Log full request bodies (default false)
-	ResponseBody   bool   `mapstructure:"response_body"`   // Log full response bodies (default false)
-	HideTokenHash  bool   `mapstructure:"hide_token_hash"` // Mask token hashes in logs (default false)
-	DisableRequest bool   `mapstructure:"disable_request"` // Suppress per-request structured logs (default false)
-	ProxyLogFile   string `mapstructure:"proxy_log_file"`  // Proxy debug log filename under `dir` (default "proxy.log")
+	Level          string      `mapstructure:"level"`           // "debug", "info" (default), "warn", "error"
+	Format         string      `mapstructure:"format"`          // "json" (default), "text"
+	RequestBody    bool        `mapstructure:"request_body"`    // Log full request bodies (default false)
+	ResponseBody   bool        `mapstructure:"response_body"`   // Log full response bodies (default false)
+	HideTokenHash  bool        `mapstructure:"hide_token_hash"` // Mask token hashes in logs (default false)
+	DisableRequest bool        `mapstructure:"disable_request"` // Suppress per-request structured logs (default false)
+	ProxyLogFile   string      `mapstructure:"proxy_log_file"`  // Proxy debug log filename under `dir` (default "proxy.log")
+	File           FileLogging `mapstructure:"file"`            // Application log file configuration
+}
+
+// FileLogging controls application log file output.
+type FileLogging struct {
+	Enabled bool   `mapstructure:"enabled"`  // Enable file logging (default false)
+	Level   string `mapstructure:"level"`    // Log level for file: "debug", "info", "warn", "error" (default "info")
+	Path    string `mapstructure:"path"`     // Log file path (default: {dir}/tokenomics.log)
 }
 
 // RemoteConfig configures loading tokens and config from a central server.
@@ -188,11 +196,11 @@ type SecurityConfig struct {
 	EncryptionKeyEnv string `mapstructure:"encryption_key_env"`
 }
 
-// LedgerConfig controls per-session token tracking to .tokenomics/.
+// LedgerConfig controls per-session token tracking.
+// Files are always written to the main `dir` setting (typically ~/.tokenomics).
 type LedgerConfig struct {
-	Enabled bool   `mapstructure:"enabled"` // Enable session ledger (default false)
-	Dir     string `mapstructure:"dir"`     // Output directory (default ".tokenomics")
-	Memory  bool   `mapstructure:"memory"`  // Record conversation content (default true)
+	Enabled bool `mapstructure:"enabled"` // Enable session ledger (default true)
+	Memory  bool `mapstructure:"memory"`  // Record conversation content (default true)
 }
 
 func Load(cfgFile string) (*Config, error) {
@@ -215,7 +223,7 @@ func Load(cfgFile string) (*Config, error) {
 	v.SetDefault("server.https_port", 8443)
 	v.SetDefault("server.tls.enabled", true)
 	v.SetDefault("server.tls.auto_gen", true)
-	v.SetDefault("server.tls.cert_dir", "./certs")
+	v.SetDefault("server.tls.cert_dir", "")  // empty = derive from dir at use time
 	v.SetDefault("server.upstream_url", "https://api.openai.com")
 	v.SetDefault("storage.db_path", "")                     // empty = derive from dir at use time
 	v.SetDefault("session.backend", "memory")
@@ -226,8 +234,11 @@ func Load(cfgFile string) (*Config, error) {
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
 	v.SetDefault("logging.proxy_log_file", "proxy.log")
+	v.SetDefault("logging.disable_request", true)           // Per-request logs disabled by default
+	v.SetDefault("logging.file.enabled", false)             // File logging disabled by default
+	v.SetDefault("logging.file.level", "info")              // Log level for file output
+	v.SetDefault("logging.file.path", "")                   // empty = resolve to {dir}/tokenomics.log
 	v.SetDefault("ledger.enabled", true)                    // Enable session ledger by default
-	v.SetDefault("ledger.dir", "")                          // empty = derive from dir at use time
 	v.SetDefault("ledger.memory", true)                     // Record conversation content
 
 	v.SetEnvPrefix("TOKENOMICS")
@@ -235,7 +246,9 @@ func Load(cfgFile string) (*Config, error) {
 	v.AutomaticEnv()
 
 	// Explicitly bind environment variables that may not have file-based defaults
-	v.BindEnv("default_provider", "TOKENOMICS_DEFAULT_PROVIDER")
+	if err := v.BindEnv("default_provider", "TOKENOMICS_DEFAULT_PROVIDER"); err != nil {
+		return nil, fmt.Errorf("bind default_provider env: %w", err)
+	}
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
@@ -250,7 +263,14 @@ func Load(cfgFile string) (*Config, error) {
 
 	// Resolve derived paths
 	if cfg.Dir == "" {
-		cfg.Dir = ".tokenomics"
+		// Default to ~/.tokenomics
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			cfg.Dir = filepath.Join(homeDir, ".tokenomics")
+		} else {
+			// Fallback if home dir unavailable
+			cfg.Dir = ".tokenomics"
+		}
 	}
 	// Convert to absolute path to avoid working directory issues
 	if !filepath.IsAbs(cfg.Dir) {
@@ -263,8 +283,10 @@ func Load(cfgFile string) (*Config, error) {
 	if cfg.Storage.DBPath == "" || cfg.Storage.DBPath == "./tokenomics.db" {
 		cfg.Storage.DBPath = filepath.Join(cfg.Dir, "tokenomics.db")
 	}
-	if cfg.Ledger.Dir == "" {
-		cfg.Ledger.Dir = cfg.Dir
+
+	// If cert_dir is empty, resolve it to use cfg.Dir/certs
+	if cfg.Server.TLS.CertDir == "" || cfg.Server.TLS.CertDir == "./certs" {
+		cfg.Server.TLS.CertDir = filepath.Join(cfg.Dir, "certs")
 	}
 
 	// Ensure .tokenomics directory and bootstrap files exist
