@@ -1,0 +1,53 @@
+{
+  "base_key_env": "MY_ANTHROPIC_KEY",
+  "providers": {
+    "anthropic": [
+      {
+        "base_key_env": "MY_ANTHROPIC_KEY",
+        "model_regex": "^claude-",
+        "max_tokens": 4096
+      }
+    ]
+  },
+  "rules": [
+    {
+      "type": "jailbreak",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "type": "regex",
+      "pattern": "(?i)(system prompt|system instruction|ignore.*instruction|override.*instruction|disregard|forget|you are now|you are an|pretend you are|act as if|roleplay)",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "type": "regex",
+      "pattern": "(?i)(previous instruction|original instruction|real instruction|true instruction|before this|discard everything|start over|new instructions from now)",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "type": "regex",
+      "pattern": "(?i)(repeat back|say nothing else|only respond with|respond only|final answer|conclusion|summary is)",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "type": "keyword",
+      "keywords": ["what if", "imagine if", "suppose", "assuming that", "let's say", "pretend that"],
+      "action": "warn",
+      "scope": "input"
+    },
+    {
+      "type": "pii",
+      "detect": ["api_key", "private_key"],
+      "action": "mask",
+      "scope": "output"
+    }
+  ],
+  "metadata": {
+    "policy_type": "prompt-injection-detection",
+    "team": "security"
+  }
+}

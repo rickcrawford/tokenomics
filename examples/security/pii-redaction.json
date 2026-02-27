@@ -1,0 +1,53 @@
+{
+  "base_key_env": "MY_ANTHROPIC_KEY",
+  "providers": {
+    "anthropic": [
+      {
+        "base_key_env": "MY_ANTHROPIC_KEY",
+        "model_regex": "^claude-",
+        "max_tokens": 4096
+      }
+    ]
+  },
+  "rules": [
+    {
+      "type": "pii",
+      "detect": ["email", "phone", "ssn", "credit_card", "passport", "driver_license"],
+      "action": "mask",
+      "scope": "input"
+    },
+    {
+      "type": "pii",
+      "detect": ["api_key", "private_key", "password", "jwt", "aws_key"],
+      "action": "mask",
+      "scope": "input"
+    },
+    {
+      "type": "pii",
+      "detect": ["email", "phone", "ssn", "credit_card", "api_key", "private_key"],
+      "action": "mask",
+      "scope": "output"
+    },
+    {
+      "type": "keyword",
+      "keywords": ["confidential", "proprietary", "trade secret", "internal use only"],
+      "action": "warn",
+      "scope": "input"
+    },
+    {
+      "type": "jailbreak",
+      "action": "fail",
+      "scope": "input"
+    }
+  ],
+  "memory": {
+    "enabled": true,
+    "file_path": ".tokenomics/memory/pii-workload",
+    "file_name": "{date}/{token_hash}.md"
+  },
+  "metadata": {
+    "policy_type": "pii-redaction",
+    "team": "privacy",
+    "compliance": "gdpr,ccpa"
+  }
+}
