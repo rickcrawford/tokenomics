@@ -77,7 +77,7 @@ tokenomics run python my_agent.py
 # Option B: Manual proxy setup
 tokenomics serve &
 # In agent code:
-# client = OpenAI(api_key="tkn_abc123...", base_url="http://localhost:8000/v1")
+# client = OpenAI(api_key="tkn_abc123...", base_url="http://localhost:8080/v1")
 ```
 
 Your agent now has guardrails applied automatically.
@@ -90,7 +90,7 @@ Create `~/.tokenomics/config.yaml`:
 
 ```yaml
 # Server
-listen: "0.0.0.0:8000"
+listen: "0.0.0.0:8080"
 tls: true
 
 # Upstream providers
@@ -329,7 +329,7 @@ from openai import OpenAI
 # Point to Tokenomics proxy
 client = OpenAI(
     api_key="tkn_slack_bot_xyz",
-    base_url="http://tokenomics.local:8000/v1"
+    base_url="http://tokenomics.local:8080/v1"
 )
 
 # Send metadata in headers
@@ -353,7 +353,7 @@ from openai import OpenAI
 
 client = OpenAI(
     api_key="tkn_discord_bot_xyz",
-    base_url="http://tokenomics.local:8000/v1"
+    base_url="http://tokenomics.local:8080/v1"
 )
 
 async def on_message(message):
@@ -421,7 +421,7 @@ for channel, metrics in channels.items():
 
 ```bash
 # Check Tokenomics is running
-lsof -i :8000
+lsof -i :8080
 
 # Verify token exists
 tokenomics token list | grep tkn_
@@ -501,7 +501,7 @@ Content rules can automatically redact sensitive data:
 ### Health Check
 
 ```bash
-curl https://localhost:8000/stats
+curl https://localhost:8080/stats
 ```
 
 ### Metrics Available

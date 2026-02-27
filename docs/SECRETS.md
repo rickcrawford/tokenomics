@@ -213,7 +213,7 @@ TOKENOMICS_HASH_KEY="random-secret-used-to-encrypt-tokens"
 
 # Optional
 TOKENOMICS_DIR="~/.tokenomics"       # Data directory
-TOKENOMICS_LISTEN="0.0.0.0:8000"    # Listen address
+TOKENOMICS_LISTEN="0.0.0.0:8080"    # Listen address (default)
 TOKENOMICS_TLS="true"               # Enable TLS
 ```
 

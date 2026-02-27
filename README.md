@@ -12,6 +12,12 @@ Tokenomics is an OpenAI-compatible reverse proxy that acts as a guardrail system
 
 One binary. Zero code changes. Drop it in front of any agent that speaks the OpenAI protocol.
 
+---
+
+**Created by [Rick Crawford](https://github.com/rickcrawford)** • [LinkedIn](https://www.linkedin.com/in/rickcrawford/) • [MIT License](LICENSE)
+
+---
+
 ## What It Does
 
 ### 🛑 Cost Guardrails
@@ -166,11 +172,3 @@ Tokenomics provides personal guardrails for OpenClaw autonomous agents. Set budg
 - Usage tracking: Record conversations and cost attribution
 
 See [examples/openclaw](examples/openclaw/) for complete examples (Slack, Discord, personal assistant) and [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md) for the integration guide.
-
-## Author
-
-**Rick Crawford** - [LinkedIn](https://www.linkedin.com/in/rickcrawford/) | [GitHub](https://github.com/rickcrawford)
-
-## License
-
-[MIT](LICENSE)
