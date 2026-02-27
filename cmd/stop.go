@@ -67,8 +67,11 @@ func runStop(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Poll briefly to confirm exit
-	for i := 0; i < 30; i++ {
+	// Poll to confirm exit. The serve process may take up to 10 seconds
+	// for HTTP graceful shutdown, so we wait up to 12 seconds before
+	// resorting to SIGKILL. This prevents force-killing the process
+	// while it is still closing the database and flushing state.
+	for i := 0; i < 120; i++ {
 		if !processAlive(pid) {
 			os.Remove(pidFile)
 			fmt.Fprintf(os.Stderr, "Proxy stopped (PID %d)\n", pid)

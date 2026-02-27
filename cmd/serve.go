@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -244,6 +245,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	errCh := make(chan error, 2)
+	var shutdownWG sync.WaitGroup
 
 	// HTTP server (optional, for health checks or non-TLS)
 	if cfg.Server.HTTPPort > 0 {
@@ -257,7 +259,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 				errCh <- fmt.Errorf("http: %w", err)
 			}
 		}()
+		shutdownWG.Add(1)
 		go func() {
+			defer shutdownWG.Done()
 			<-ctx.Done()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -311,7 +315,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 				errCh <- fmt.Errorf("https: %w", err)
 			}
 		}()
+		shutdownWG.Add(1)
 		go func() {
+			defer shutdownWG.Done()
 			<-ctx.Done()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -339,6 +345,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	case err := <-errCh:
 		return err
 	}
+
+	// Wait for all HTTP servers to finish draining in-flight requests
+	// before returning. Deferred resource cleanup (tokenStore.Close,
+	// emitter.Close, etc.) runs after this, so the DB is only closed
+	// once no handlers are still running.
+	shutdownWG.Wait()
+	log.Println("All servers stopped, releasing resources...")
 
 	return nil
 }

@@ -67,9 +67,9 @@ func NewBoltStore(dbPath string, encryptionSecret string) *BoltStore {
 }
 
 func (s *BoltStore) Init() error {
-	db, err := bolt.Open(s.dbPath, 0o600, &bolt.Options{Timeout: 1 * time.Second})
+	db, err := bolt.Open(s.dbPath, 0o600, &bolt.Options{Timeout: 2 * time.Second})
 	if err != nil {
-		return fmt.Errorf("open bolt db: %w", err)
+		return fmt.Errorf("open bolt db %s: %w (another process may still hold the lock, try 'tokenomics stop' first)", s.dbPath, err)
 	}
 	s.db = db
 

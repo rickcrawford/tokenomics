@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
@@ -163,6 +165,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 		serveCmd = exec.Command(os.Args[0], serveArgs...)
 		serveCmd.Stdout = os.Stderr
 		serveCmd.Stderr = os.Stderr
+		// Put serve subprocess in its own process group so it does not
+		// receive Ctrl+C (SIGINT) from the terminal. We send signals
+		// explicitly during cleanup to avoid a double-signal that would
+		// bypass Go's graceful shutdown handler.
+		setProcessGroup(serveCmd)
 		// Tell serve which port to bind, overriding config defaults.
 		// Always enable both HTTP and HTTPS for ephemeral proxy
 		// Preserve all parent environment variables to ensure API key env vars are available
@@ -181,17 +188,44 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Cleanup function to ensure local proxy is shut down (no-op if using remote)
-	defer func() {
-		if serveCmd != nil && serveCmd.Process != nil {
-			if err := interruptProcess(serveCmd.Process); err != nil {
-				fmt.Fprintf(os.Stderr, "proxy interrupt error: %v\n", err)
-			}
-			if err := serveCmd.Wait(); err != nil {
-				fmt.Fprintf(os.Stderr, "proxy shutdown wait error: %v\n", err)
-			}
+	// shutdownServe sends SIGTERM to the serve subprocess and waits for
+	// it to exit gracefully. If the process does not exit within 12
+	// seconds, it is force-killed.
+	shutdownServe := func() {
+		if serveCmd == nil || serveCmd.Process == nil {
+			return
 		}
-	}()
+		// Use SIGTERM so the serve process runs its graceful shutdown
+		// path (drain HTTP servers, close DB, etc.).
+		if err := terminateProcess(serveCmd.Process); err != nil {
+			// Process may already be dead.
+			_ = serveCmd.Wait()
+			return
+		}
+		// Wait for the process in a goroutine so we can enforce a timeout.
+		done := make(chan struct{})
+		go func() {
+			_ = serveCmd.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			// Exited cleanly.
+		case <-time.After(12 * time.Second):
+			// Force kill after timeout.
+			_ = killProcess(serveCmd.Process)
+			<-done
+		}
+	}
+
+	// Intercept signals so we can tear down the serve subprocess
+	// ourselves instead of relying on the OS to propagate the signal.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	// Cleanup: ensure the local proxy is shut down when we return.
+	defer shutdownServe()
 
 	healthURL := fmt.Sprintf("%s/ping", baseURL)
 
@@ -261,9 +295,30 @@ func runRun(cmd *cobra.Command, args []string) error {
 	userCmd.Stdout = os.Stdout
 	userCmd.Stderr = os.Stderr
 
-	err := userCmd.Run()
+	if err := userCmd.Start(); err != nil {
+		return fmt.Errorf("start command: %w", err)
+	}
 
-	// Proxy cleanup happens in defer
+	// Wait for either the user command to finish or a signal.
+	cmdDone := make(chan error, 1)
+	go func() {
+		cmdDone <- userCmd.Wait()
+	}()
 
-	return err
+	select {
+	case err := <-cmdDone:
+		// User command finished normally (or with its own error).
+		// Proxy cleanup happens in defer (shutdownServe).
+		return err
+	case <-sigCh:
+		// We caught Ctrl+C / SIGTERM. The user command (in our process
+		// group) also received the signal. Wait briefly for it to exit.
+		select {
+		case err := <-cmdDone:
+			return err
+		case <-time.After(5 * time.Second):
+			_ = userCmd.Process.Kill()
+			return fmt.Errorf("command did not exit after signal")
+		}
+	}
 }

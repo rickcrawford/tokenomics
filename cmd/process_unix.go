@@ -38,3 +38,9 @@ func killProcess(p *os.Process) error {
 func interruptProcess(p *os.Process) error {
 	return p.Signal(syscall.SIGINT)
 }
+
+// setProcessGroup puts the command in its own process group so it does
+// not receive signals (e.g. Ctrl+C) sent to the parent's group.
+func setProcessGroup(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
