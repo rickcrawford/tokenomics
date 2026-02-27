@@ -41,3 +41,7 @@ func killProcess(p *os.Process) error {
 func interruptProcess(p *os.Process) error {
 	return p.Kill()
 }
+
+// setProcessGroup is a no-op on Windows. Child processes do not share
+// the parent's console signal group by default.
+func setProcessGroup(cmd *exec.Cmd) {}
