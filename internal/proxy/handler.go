@@ -41,6 +41,58 @@ func safePrefix(s string, n int) string {
 	return s[:n]
 }
 
+// OpenClawMetadata holds optional metadata from OpenClaw agents
+type OpenClawMetadata struct {
+	AgentID     string
+	AgentType   string
+	Team        string
+	Channel     string
+	Skill       string
+	Environment string
+}
+
+// extractOpenClawMetadata extracts optional OpenClaw metadata from request headers
+// All headers are optional - only populated if present
+func extractOpenClawMetadata(r *http.Request) OpenClawMetadata {
+	return OpenClawMetadata{
+		AgentID:     r.Header.Get("X-OpenClaw-Agent-ID"),
+		AgentType:   r.Header.Get("X-OpenClaw-Agent-Type"),
+		Team:        r.Header.Get("X-OpenClaw-Team"),
+		Channel:     r.Header.Get("X-OpenClaw-Channel"),
+		Skill:       r.Header.Get("X-OpenClaw-Skill"),
+		Environment: r.Header.Get("X-OpenClaw-Environment"),
+	}
+}
+
+// openClawMetadataToMap converts OpenClawMetadata to a map[string]string,
+// excluding empty values to keep the metadata compact
+func openClawMetadataToMap(meta OpenClawMetadata) map[string]string {
+	result := make(map[string]string)
+	if meta.AgentID != "" {
+		result["agent_id"] = meta.AgentID
+	}
+	if meta.AgentType != "" {
+		result["agent_type"] = meta.AgentType
+	}
+	if meta.Team != "" {
+		result["team"] = meta.Team
+	}
+	if meta.Channel != "" {
+		result["channel"] = meta.Channel
+	}
+	if meta.Skill != "" {
+		result["skill"] = meta.Skill
+	}
+	if meta.Environment != "" {
+		result["environment"] = meta.Environment
+	}
+	// Return nil if no metadata was set to avoid empty maps in JSON
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 type Handler struct {
 	store           store.TokenStore
 	sessions        session.Store
@@ -255,14 +307,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		upstream = pol.UpstreamURL
 	}
 
+	// Extract OpenClaw metadata from request headers
+	openClawMeta := extractOpenClawMetadata(r)
+
 	// For chat completions, apply policy engine with multi-provider resolution
 	if isChatCompletions(r.URL.Path) {
-		h.handleChatCompletions(w, r, pol, tokenHash, upstream, start)
+		h.handleChatCompletions(w, r, pol, tokenHash, upstream, start, openClawMeta)
 		return
 	}
 
 	// For all other /v1/* endpoints, passthrough with key swap
-	h.passthrough(w, r, pol, tokenHash, upstream, start)
+	h.passthrough(w, r, pol, tokenHash, upstream, start, openClawMeta)
 }
 
 func (h *Handler) hashToken(token string) string {

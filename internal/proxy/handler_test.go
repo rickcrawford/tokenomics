@@ -520,3 +520,191 @@ func TestHandler_PassthroughAuthHeaderCleaned(t *testing.T) {
 func hashForTest(h *Handler, token string) string {
 	return h.hashToken(token)
 }
+
+func TestExtractOpenClawMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		headers  map[string]string
+		expected OpenClawMetadata
+	}{
+		{
+			name:     "all_headers_present",
+			headers:  map[string]string{
+				"X-OpenClaw-Agent-ID":     "agent_123",
+				"X-OpenClaw-Agent-Type":   "slack",
+				"X-OpenClaw-Team":         "platform",
+				"X-OpenClaw-Channel":      "general",
+				"X-OpenClaw-Skill":        "search",
+				"X-OpenClaw-Environment":  "production",
+			},
+			expected: OpenClawMetadata{
+				AgentID:     "agent_123",
+				AgentType:   "slack",
+				Team:        "platform",
+				Channel:     "general",
+				Skill:       "search",
+				Environment: "production",
+			},
+		},
+		{
+			name:     "partial_headers",
+			headers:  map[string]string{
+				"X-OpenClaw-Agent-ID": "agent_456",
+				"X-OpenClaw-Team":     "ml",
+			},
+			expected: OpenClawMetadata{
+				AgentID: "agent_456",
+				Team:    "ml",
+			},
+		},
+		{
+			name:     "no_headers",
+			headers:  map[string]string{},
+			expected: OpenClawMetadata{},
+		},
+		{
+			name:     "empty_header_values",
+			headers:  map[string]string{
+				"X-OpenClaw-Agent-ID": "",
+				"X-OpenClaw-Team":     "",
+			},
+			expected: OpenClawMetadata{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			for k, v := range tt.headers {
+				req.Header.Set(k, v)
+			}
+
+			result := extractOpenClawMetadata(req)
+
+			if result.AgentID != tt.expected.AgentID {
+				t.Errorf("AgentID: expected %q, got %q", tt.expected.AgentID, result.AgentID)
+			}
+			if result.AgentType != tt.expected.AgentType {
+				t.Errorf("AgentType: expected %q, got %q", tt.expected.AgentType, result.AgentType)
+			}
+			if result.Team != tt.expected.Team {
+				t.Errorf("Team: expected %q, got %q", tt.expected.Team, result.Team)
+			}
+			if result.Channel != tt.expected.Channel {
+				t.Errorf("Channel: expected %q, got %q", tt.expected.Channel, result.Channel)
+			}
+			if result.Skill != tt.expected.Skill {
+				t.Errorf("Skill: expected %q, got %q", tt.expected.Skill, result.Skill)
+			}
+			if result.Environment != tt.expected.Environment {
+				t.Errorf("Environment: expected %q, got %q", tt.expected.Environment, result.Environment)
+			}
+		})
+	}
+}
+
+func TestOpenClawMetadataToMap(t *testing.T) {
+	tests := []struct {
+		name     string
+		meta     OpenClawMetadata
+		expected map[string]string
+	}{
+		{
+			name: "all_fields_populated",
+			meta: OpenClawMetadata{
+				AgentID:     "agent_123",
+				AgentType:   "slack",
+				Team:        "platform",
+				Channel:     "general",
+				Skill:       "search",
+				Environment: "production",
+			},
+			expected: map[string]string{
+				"agent_id":    "agent_123",
+				"agent_type":  "slack",
+				"team":        "platform",
+				"channel":     "general",
+				"skill":       "search",
+				"environment": "production",
+			},
+		},
+		{
+			name: "partial_fields",
+			meta: OpenClawMetadata{
+				AgentID: "agent_456",
+				Team:    "ml",
+			},
+			expected: map[string]string{
+				"agent_id": "agent_456",
+				"team":     "ml",
+			},
+		},
+		{
+			name:     "no_fields",
+			meta:     OpenClawMetadata{},
+			expected: nil,
+		},
+		{
+			name: "single_field",
+			meta: OpenClawMetadata{Channel: "alerts"},
+			expected: map[string]string{
+				"channel": "alerts",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := openClawMetadataToMap(tt.meta)
+
+			if len(result) != len(tt.expected) {
+				t.Errorf("length: expected %d, got %d", len(tt.expected), len(result))
+			}
+
+			for k, v := range tt.expected {
+				if result[k] != v {
+					t.Errorf("key %q: expected %q, got %q", k, v, result[k])
+				}
+			}
+
+			// Check no extra keys
+			for k := range result {
+				if _, exists := tt.expected[k]; !exists {
+					t.Errorf("unexpected key in result: %q", k)
+				}
+			}
+		})
+	}
+}
+
+func TestHandler_OpenClawMetadataInRequest(t *testing.T) {
+	t.Setenv("TEST_API_KEY", "sk-test-123")
+
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":      "chatcmpl-test",
+			"choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"content": "response"}}},
+			"usage":   map[string]interface{}{"completion_tokens": 10},
+		})
+	})
+	defer upstream.Close()
+
+	pol := &policy.Policy{BaseKeyEnv: "TEST_API_KEY"}
+	pol.Validate()
+	ts.Save(hashForTest(handler, "tkn_ocm_test"), pol)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4","messages":[{"role":"user","content":"test"}]}`))
+	req.Header.Set("Authorization", "Bearer tkn_ocm_test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-OpenClaw-Agent-ID", "agent_test_123")
+	req.Header.Set("X-OpenClaw-Team", "ml")
+	req.Header.Set("X-OpenClaw-Channel", "alerts")
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+}

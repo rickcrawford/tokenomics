@@ -1,0 +1,117 @@
+{
+  "base_key_env": "OPENAI_PAT",
+  "max_tokens": 1000000,
+
+  "providers": {
+    "openai": [
+      {
+        "base_key_env": "OPENAI_PAT",
+        "model": "gpt-4-turbo",
+        "max_tokens": 2000
+      },
+      {
+        "base_key_env": "OPENAI_PAT",
+        "model_regex": "^gpt-3\\.5.*",
+        "max_tokens": 4000
+      }
+    ],
+    "anthropic": [
+      {
+        "base_key_env": "ANTHROPIC_PAT",
+        "model": "claude-opus",
+        "max_tokens": 2000
+      },
+      {
+        "base_key_env": "ANTHROPIC_PAT",
+        "model": "claude-haiku",
+        "max_tokens": 4000
+      }
+    ]
+  },
+
+  "memory": {
+    "enabled": true,
+    "file_path": ".tokenomics/memory",
+    "file_name": "{date}/{token_hash}.md"
+  },
+
+  "rate_limit": {
+    "rules": [
+      {
+        "requests": 100,
+        "window": "1m",
+        "strategy": "sliding"
+      },
+      {
+        "tokens": 1000000,
+        "window": "24h",
+        "strategy": "fixed"
+      }
+    ],
+    "max_parallel": 5
+  },
+
+  "retry": {
+    "max_retries": 2,
+    "retry_on": [429, 500, 502, 503],
+    "fallbacks": ["gpt-3.5-turbo", "claude-haiku"]
+  },
+
+  "rules": [
+    {
+      "name": "Block jailbreak attempts",
+      "type": "jailbreak",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "name": "Mask PII in input (emails, phones, SSNs, credit cards)",
+      "type": "pii",
+      "detect": ["email", "phone", "ssn", "credit_card"],
+      "action": "mask",
+      "scope": "input"
+    },
+    {
+      "name": "Warn on secrets in input (APIs, keys, tokens)",
+      "type": "pii",
+      "detect": ["api_key", "private_key", "github_token", "jwt"],
+      "action": "warn",
+      "scope": "input"
+    },
+    {
+      "name": "Mask sensitive data in output",
+      "type": "pii",
+      "detect": ["api_key", "private_key", "connection_string"],
+      "action": "mask",
+      "scope": "output"
+    },
+    {
+      "name": "Block shell commands in input",
+      "type": "regex",
+      "pattern": "(?i)(shell|bash|sh|exec|eval)\\s*\\(|rm\\s+-rf|drop\\s+table",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "name": "Block internal passwords",
+      "type": "keyword",
+      "keywords": [
+        "internal password",
+        "admin password",
+        "database password",
+        "api secret",
+        "slack webhook"
+      ],
+      "action": "fail",
+      "scope": "input"
+    }
+  ],
+
+  "metadata": {
+    "agent_id": "slack-bot",
+    "agent_type": "slack",
+    "team": "default",
+    "environment": "production",
+    "cost_center": "engineering"
+  }
+}

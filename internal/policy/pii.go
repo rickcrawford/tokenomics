@@ -30,6 +30,58 @@ type piiDetector struct {
 	label   string // Human-readable label for logs
 }
 
+// jailbreakPattern represents a regex pattern for detecting jailbreak attempts
+type jailbreakPattern struct {
+	name    string
+	pattern string
+}
+
+// jailbreakPatterns contains regex patterns for common jailbreak/prompt injection attempts
+var jailbreakPatterns = []jailbreakPattern{
+	// Instruction override attempts
+	{"ignore_previous", `(?i)ignore\s+(your\s+)?previous\s+(instructions|rules|guidelines)`},
+	{"forget_previous", `(?i)forget\s+(all\s+)?(previous|earlier|prior)\s+(instructions|rules|constraints)`},
+	{"disregard_instructions", `(?i)(disregard|abandon|drop|remove)\s+(all\s+)?(instructions|rules|constraints|guidelines)`},
+
+	// Developer/test mode claims
+	{"developer_mode", `(?i)(developer\s+mode|test\s+mode|debug\s+mode|you\s+are\s+in\s+\w+\s+mode)`},
+	{"bypass_safety", `(?i)(bypass|disable|remove|override|circumvent)\s+(all\s+)?(safety|security|ethical|content\s+)?filters?`},
+
+	// Role-playing/actor requests (combined with harmful modifiers)
+	{"harmful_roleplay", `(?i)(act\s+as|roleplay|pretend|imagine|assume|you\s+are)\s+(\w+\s+)*(unrestricted|unconstrained|unfiltered|jailbroken|hacker|evil|malicious|unethical)`},
+
+	// Hypothetical/research framing with harmful intent
+	{"hypothetical_harm", `(?i)(hypothetically|for\s+research|for\s+academic|as\s+a\s+test|in\s+a\s+scenario).*(exploit|harmful|illegal|unethical|violence|hack)`},
+
+	// Jailbreak tool names (common known jailbreaks)
+	{"known_jailbreaks", `(?i)\b(DAN|UCAR|Coach|AIM|STAN|TalkGPT|BadGPT|BadAI)\s*:`},
+}
+
+// Pre-compiled jailbreak patterns for performance
+var compiledJailbreakPatterns []*regexp.Regexp
+
+// init pre-compiles jailbreak patterns on startup
+func initJailbreakPatterns() {
+	for _, p := range jailbreakPatterns {
+		if re, err := regexp.Compile(p.pattern); err == nil {
+			compiledJailbreakPatterns = append(compiledJailbreakPatterns, re)
+		}
+	}
+}
+
+// detectJailbreakFast checks if content contains jailbreak attempt patterns using pre-compiled regexes
+func detectJailbreakFast(content string) bool {
+	if len(compiledJailbreakPatterns) == 0 {
+		return false
+	}
+	for _, re := range compiledJailbreakPatterns {
+		if re.MatchString(content) {
+			return true
+		}
+	}
+	return false
+}
+
 // builtinPII maps PII type names to their detection patterns.
 var builtinPII = map[PIIType]struct {
 	pattern string
@@ -135,4 +187,9 @@ type PIIMatch struct {
 	Type  PIIType `json:"type"`
 	Label string  `json:"label"`
 	Value string  `json:"value"`
+}
+
+// init pre-compiles patterns on startup for performance
+func init() {
+	initJailbreakPatterns()
 }

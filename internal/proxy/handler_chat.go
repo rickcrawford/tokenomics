@@ -85,7 +85,10 @@ func initDebugLogger() {
 	debugLogger = log.New(f, "", log.LstdFlags)
 }
 
-func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time) {
+func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time, openClawMeta OpenClawMetadata) {
+	// Extract OpenClaw metadata early so it's available in defer
+	openClawEventMeta := openClawMetadataToMap(openClawMeta)
+
 	logEntry := &RequestLog{
 		Timestamp:  start.UTC().Format(time.RFC3339Nano),
 		Method:     r.Method,
@@ -93,11 +96,21 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 		TokenHash:  safePrefix(tokenHash, 16),
 		RemoteAddr: r.RemoteAddr,
 		UserAgent:  r.UserAgent(),
+		Metadata:   openClawEventMeta,
 	}
 	defer func() {
 		logEntry.DurationMs = time.Since(start).Milliseconds()
 		if !h.logging.DisableRequest {
 			logRequest(logEntry)
+		}
+
+		// Emit OpenClaw success/error events if metadata is present
+		if openClawEventMeta != nil && len(openClawEventMeta) > 0 {
+			if logEntry.StatusCode >= 200 && logEntry.StatusCode < 300 {
+				h.emitOpenClawEvent(r.Context(), events.OpenClawAgentSuccess, openClawEventMeta, logEntry.StatusCode, logEntry.Model, tokenHash, "")
+			} else {
+				h.emitOpenClawEvent(r.Context(), events.OpenClawAgentError, openClawEventMeta, logEntry.StatusCode, logEntry.Model, tokenHash, logEntry.Error)
+			}
 		}
 	}()
 
@@ -127,15 +140,25 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 	model, _ := reqBody["model"].(string)
 	logEntry.Model = model
 
+	// Emit OpenClaw agent request event if metadata is present
+	h.emitOpenClawEvent(r.Context(), events.OpenClawAgentRequest, openClawEventMeta, 0, model, tokenHash, "")
+
 	// Log policy lookup to detailed logger
 	debugLog("Policy loaded for token %s", safePrefix(tokenHash, 16))
 	debugLog("BaseKeyEnv: %s", pol.BaseKeyEnv)
 
 	resolved := pol.ResolveForModel(model)
 
-	// Attach metadata to log entry
+	// Attach metadata to log entry (merge with OpenClaw metadata)
 	if len(resolved.Metadata) > 0 {
-		logEntry.Metadata = resolved.Metadata
+		if logEntry.Metadata == nil {
+			logEntry.Metadata = resolved.Metadata
+		} else {
+			// Merge resolved metadata into OpenClaw metadata
+			for k, v := range resolved.Metadata {
+				logEntry.Metadata[k] = v
+			}
+		}
 	}
 
 	// Resolve provider config for auth, headers, and chat path
@@ -222,10 +245,17 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 					Action:  match.Action,
 					Message: match.Message,
 				})
-				h.emitter.Emit(r.Context(), events.New(events.RuleViolation, map[string]interface{}{
+				ruleEvent := map[string]interface{}{
 					"token_hash": safePrefix(tokenHash, 16), "model": model,
 					"rule_name": match.Name, "message": match.Message,
-				}))
+				}
+				// Include OpenClaw metadata in rule violation events
+				if openClawEventMeta != nil {
+					for k, v := range openClawEventMeta {
+						ruleEvent[k] = v
+					}
+				}
+				h.emitter.Emit(r.Context(), events.New(events.RuleViolation, ruleEvent))
 			}
 			log.Printf("[rule:fail] policy violation: %s (token=%s model=%s)", err.Error(), safePrefix(tokenHash, 16), model)
 			logEntry.StatusCode = http.StatusForbidden
@@ -1003,4 +1033,32 @@ func formatResponseForMemory(body []byte, contentType string) string {
 		}
 	}
 	return result.String()
+}
+
+// emitOpenClawEvent emits webhook events for OpenClaw agent requests.
+// Emits on agent request, success, error, or rule violations.
+func (h *Handler) emitOpenClawEvent(ctx context.Context, eventType string, metadata map[string]string, statusCode int, model string, tokenHash string, errorMsg string) {
+	if metadata == nil || len(metadata) == 0 {
+		return // No OpenClaw metadata, skip event
+	}
+
+	data := map[string]interface{}{
+		"token_hash": safePrefix(tokenHash, 16),
+		"model":      model,
+		"status":     statusCode,
+	}
+
+	// Add all OpenClaw metadata fields to the event
+	for k, v := range metadata {
+		if v != "" {
+			data[k] = v
+		}
+	}
+
+	// Add error message if present
+	if errorMsg != "" {
+		data["error"] = errorMsg
+	}
+
+	h.emitter.Emit(ctx, events.New(eventType, data))
 }

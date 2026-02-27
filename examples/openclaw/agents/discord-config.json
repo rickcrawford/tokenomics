@@ -1,0 +1,74 @@
+{
+  "agent": {
+    "id": "discord-bot",
+    "name": "Discord Assistant",
+    "type": "discord",
+    "environment": "production"
+  },
+
+  "llm": {
+    "type": "openai-compatible",
+    "api_url": "http://localhost:8080",
+    "api_key": "{{TOKEN_HASH_FROM_TOKEN_CREATE}}",
+    "model": "gpt-4-turbo",
+    "temperature": 0.7,
+    "max_tokens": 2000,
+    "timeout_ms": 30000,
+    "fallback_models": [
+      "gpt-3.5-turbo",
+      "claude-opus"
+    ]
+  },
+
+  "discord": {
+    "bot_token": "MTk4NjIyNDgzNTg3NzkyOTcy.Clwa7A.x3Z7z...",
+    "prefix": "!",
+    "intents": [
+      "GUILD_MESSAGES",
+      "DIRECT_MESSAGES",
+      "MESSAGE_CONTENT"
+    ]
+  },
+
+  "logging": {
+    "level": "info",
+    "file": "~/.openclaw/logs/discord-bot.log"
+  },
+
+  "skills": {
+    "enabled": [
+      "web_search",
+      "file_operations",
+      "http_request"
+    ],
+    "max_concurrent": 3,
+    "security_policies": {
+      "disable_shell": true,
+      "disable_file_write": true,
+      "allowed_domains": [
+        "github.com",
+        "api.github.com"
+      ]
+    }
+  },
+
+  "budgets": {
+    "daily_tokens": 500000,
+    "monthly_tokens": 15000000,
+    "soft_limit_percent": 75,
+    "hard_limit_action": "reject"
+  },
+
+  "monitoring": {
+    "enabled": true,
+    "webhook_url": "http://localhost:9090/webhooks/openclaw",
+    "log_level": "info",
+    "log_file": "~/.openclaw/logs/discord-bot.log"
+  },
+
+  "metadata": {
+    "team": "community",
+    "cost_center": "operations",
+    "discord_guild": "my-guild-id"
+  }
+}

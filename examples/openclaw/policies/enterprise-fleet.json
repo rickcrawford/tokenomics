@@ -1,0 +1,154 @@
+{
+  "base_key_env": "OPENAI_PAT",
+  "max_tokens": 50000000,
+
+  "providers": {
+    "openai": [
+      {
+        "base_key_env": "OPENAI_PAT",
+        "model": "gpt-4-turbo",
+        "max_tokens": 2000
+      },
+      {
+        "base_key_env": "OPENAI_PAT",
+        "model_regex": "^gpt-4.*",
+        "max_tokens": 2000
+      },
+      {
+        "base_key_env": "OPENAI_PAT",
+        "model_regex": "^gpt-3\\.5.*",
+        "max_tokens": 4000
+      }
+    ],
+    "anthropic": [
+      {
+        "base_key_env": "ANTHROPIC_PAT",
+        "model": "claude-opus",
+        "max_tokens": 2000
+      },
+      {
+        "base_key_env": "ANTHROPIC_PAT",
+        "model": "claude-sonnet",
+        "max_tokens": 2000
+      },
+      {
+        "base_key_env": "ANTHROPIC_PAT",
+        "model": "claude-haiku",
+        "max_tokens": 4000
+      }
+    ],
+    "azure": [
+      {
+        "base_key_env": "AZURE_OPENAI_PAT",
+        "model": "gpt-4",
+        "max_tokens": 2000
+      }
+    ]
+  },
+
+  "memory": {
+    "enabled": true,
+    "file_path": ".tokenomics/memory",
+    "file_name": "{date}/{token_hash}.md"
+  },
+
+  "rate_limit": {
+    "rules": [
+      {
+        "requests": 1000,
+        "window": "1m",
+        "strategy": "sliding"
+      },
+      {
+        "tokens": 50000000,
+        "window": "24h",
+        "strategy": "fixed"
+      },
+      {
+        "tokens": 500000,
+        "window": "1h",
+        "strategy": "sliding"
+      }
+    ],
+    "max_parallel": 50
+  },
+
+  "retry": {
+    "max_retries": 3,
+    "retry_on": [429, 500, 502, 503],
+    "fallbacks": ["gpt-3.5-turbo", "claude-haiku"]
+  },
+
+  "rules": [
+    {
+      "name": "Enterprise: Block jailbreak attempts",
+      "type": "jailbreak",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "name": "Enterprise: Mask all PII types",
+      "type": "pii",
+      "detect": [
+        "email",
+        "phone",
+        "ssn",
+        "credit_card",
+        "aws_key",
+        "api_key"
+      ],
+      "action": "mask",
+      "scope": "input"
+    },
+    {
+      "name": "Enterprise: Redact secrets in responses",
+      "type": "pii",
+      "detect": [
+        "private_key",
+        "connection_string",
+        "github_token",
+        "jwt"
+      ],
+      "action": "mask",
+      "scope": "output"
+    },
+    {
+      "name": "Enterprise: Block shell injection",
+      "type": "regex",
+      "pattern": "(?i)(shell|bash|sh|cmd|powershell)\\s*\\(|;&\\s*(rm|del|drop)|`[^`]+`",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "name": "Enterprise: Block SQL injection",
+      "type": "regex",
+      "pattern": "(?i)(union|select|insert|update|delete|drop)\\s+(into|from|table)",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "name": "Enterprise: Warn on internal references",
+      "type": "keyword",
+      "keywords": [
+        "internal password",
+        "admin panel",
+        "database credentials",
+        "api secret",
+        "slack webhook",
+        "bearer token"
+      ],
+      "action": "warn",
+      "scope": "both"
+    }
+  ],
+
+  "metadata": {
+    "agent_id": "enterprise-fleet",
+    "agent_type": "multi",
+    "team": "platform",
+    "environment": "production",
+    "cost_center": "operations",
+    "compliance": "sox,hipaa",
+    "data_classification": "confidential"
+  }
+}

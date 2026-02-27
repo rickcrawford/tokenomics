@@ -1,0 +1,69 @@
+{
+  "agent": {
+    "id": "slack-bot",
+    "name": "Slack Assistant",
+    "type": "slack",
+    "environment": "production"
+  },
+
+  "llm": {
+    "type": "openai-compatible",
+    "api_url": "http://localhost:8080",
+    "api_key": "{{TOKEN_HASH_FROM_TOKEN_CREATE}}",
+    "model": "gpt-4-turbo",
+    "temperature": 0.7,
+    "max_tokens": 2000,
+    "timeout_ms": 30000,
+    "fallback_models": [
+      "gpt-3.5-turbo",
+      "claude-opus"
+    ]
+  },
+
+  "slack": {
+    "bot_token": "xoxb-your-slack-bot-token",
+    "signing_secret": "your-slack-signing-secret",
+    "app_id": "A0123456789"
+  },
+
+  "logging": {
+    "level": "info",
+    "file": "~/.openclaw/logs/slack-bot.log"
+  },
+
+  "skills": {
+    "enabled": [
+      "web_search",
+      "file_operations",
+      "shell_execute",
+      "http_request"
+    ],
+    "max_concurrent": 3,
+    "security_policies": {
+      "disable_shell": false,
+      "disable_file_write": false,
+      "allowed_domains": ["*"]
+    }
+  },
+
+  "budgets": {
+    "daily_tokens": 1000000,
+    "monthly_tokens": 30000000,
+    "soft_limit_percent": 80,
+    "hard_limit_action": "reject",
+    "warn_at_percent": 75
+  },
+
+  "monitoring": {
+    "enabled": true,
+    "webhook_url": "http://localhost:9090/webhooks/openclaw",
+    "log_level": "info",
+    "log_file": "~/.openclaw/logs/slack-bot.log"
+  },
+
+  "metadata": {
+    "team": "engineering",
+    "cost_center": "engineering",
+    "slack_workspace": "my-workspace"
+  }
+}

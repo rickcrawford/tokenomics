@@ -1,0 +1,70 @@
+services:
+  # Tokenomics Reverse Proxy
+  tokenomics:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: tokenomics-openclaw
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    environment:
+      TOKENOMICS_DIR: /app/.tokenomics
+      TOKENOMICS_HASH_KEY: ${TOKENOMICS_HASH_KEY}
+      TOKENOMICS_ENCRYPTION_KEY: ${TOKENOMICS_ENCRYPTION_KEY}
+      OPENAI_PAT: ${OPENAI_PAT}
+      ANTHROPIC_PAT: ${ANTHROPIC_PAT}
+      AZURE_OPENAI_PAT: ${AZURE_OPENAI_PAT}
+      TOKENOMICS_LOGGING_LEVEL: info
+      TOKENOMICS_SESSION_BACKEND: memory
+    volumes:
+      - ./tokenomics-config.yaml:/app/config.yaml
+      - tokenomics-data:/app/.tokenomics
+    command: serve
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - openclaw
+
+  # Webhook Collector (receives events from tokenomics)
+  webhook-collector:
+    image: golang:1.21-alpine
+    container_name: webhook-collector
+    working_dir: /app
+    environment:
+      WEBHOOK_SECRET: my-webhook-secret
+      WEBHOOK_SIGNING_KEY: my-signing-key
+      WEBHOOK_PORT: 9090
+    volumes:
+      - ../../examples/webhook-collector:/app
+    command: go run main.go -secret my-webhook-secret -signing-key my-signing-key -port 9090
+    ports:
+      - "9090:9090"
+    networks:
+      - openclaw
+
+  # Optional: Redis for distributed deployments
+  redis:
+    image: redis:7-alpine
+    container_name: tokenomics-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - openclaw
+    profiles:
+      - distributed
+
+volumes:
+  tokenomics-data:
+  redis-data:
+
+networks:
+  openclaw:
+    driver: bridge

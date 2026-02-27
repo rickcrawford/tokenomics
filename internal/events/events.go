@@ -28,6 +28,12 @@ const (
 	// Request lifecycle
 	RequestCompleted = "request.completed"
 
+	// OpenClaw integration
+	OpenClawAgentRequest  = "openclaw.agent.request"
+	OpenClawAgentSuccess  = "openclaw.agent.success"
+	OpenClawAgentError    = "openclaw.agent.error"
+	OpenClawRuleViolation = "openclaw.rule.violation"
+
 	// System
 	ServerStart = "server.start"
 )

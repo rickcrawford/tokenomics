@@ -1,0 +1,135 @@
+# Tokenomics Configuration for OpenClaw Integration
+# This config enables all features needed for OpenClaw deployment
+# See docs/CONFIGURATION.md for full reference
+
+server:
+  http_port: 8080
+  https_port: 8443
+  tls:
+    enabled: true
+    auto_gen: true
+    cert_dir: ./certs
+
+storage:
+  # BoltDB file for token storage - auto-derived to dir/tokenomics.db if empty
+  db_path: ""
+
+session:
+  # Use memory for single-instance or redis for distributed deployments
+  backend: memory
+  redis:
+    addr: localhost:6379
+    password: ""
+    db: 0
+
+security:
+  # Environment variable names that store the security keys
+  # Generate with: openssl rand -hex 16
+  hash_key_env: TOKENOMICS_HASH_KEY
+  encryption_key_env: TOKENOMICS_ENCRYPTION_KEY
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Logging - Structured JSON logs for monitoring
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+logging:
+  level: info                    # debug, info, warn, error
+  format: json                   # json or text
+  request_body: false            # Don't log full request bodies (verbose)
+  response_body: false           # Don't log full response bodies
+  hide_token_hash: false         # Mask token hashes in logs (for security)
+  disable_request: false         # Enable per-request structured logs
+  proxy_log_file: proxy.log      # Debug log filename under dir
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# LLM Providers - API endpoints and authentication
+# Use custom env var names for PAT storage (not hardcoded defaults)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+providers:
+  openai:
+    upstream_url: "https://api.openai.com"
+    # Points to environment variable OPENAI_PAT (not the default OPENAI_API_KEY)
+    api_key_env: "OPENAI_PAT"
+    models:
+      - gpt-4-turbo
+      - gpt-4o
+      - gpt-3.5-turbo
+
+  anthropic:
+    upstream_url: "https://api.anthropic.com"
+    # Points to environment variable ANTHROPIC_PAT (not the default ANTHROPIC_API_KEY)
+    api_key_env: "ANTHROPIC_PAT"
+    auth_scheme: "header"
+    auth_header: "x-api-key"
+    headers:
+      anthropic-version: "2023-06-01"
+    models:
+      - claude-opus
+      - claude-sonnet
+      - claude-haiku
+
+  azure:
+    upstream_url: "https://my-resource.openai.azure.com"
+    api_key_env: "AZURE_OPENAI_PAT"
+    auth_scheme: "header"
+    auth_header: "api-key"
+    headers:
+      api-version: "2024-10-21"
+    models:
+      - gpt-4
+
+# Default provider when a policy doesn't explicitly specify one
+default_provider: openai
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Session Ledger - Record usage per token for cost tracking and auditing
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ledger:
+  enabled: true                           # Enable session recording
+  # dir: ""                                # Relative or absolute path (empty = derive from dir)
+  memory: true                            # Record conversation content in memory/
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Events & Webhooks - Send events to external systems for monitoring/alerting
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+events:
+  webhooks:
+    # Primary webhook endpoint - receives all events
+    - url: "http://localhost:9090/webhook"
+      secret: "my-webhook-secret"        # Sent as X-Webhook-Secret header
+      signing_key: "my-signing-key"      # HMAC-SHA256 signature in X-Webhook-Signature
+      timeout: 10                         # Timeout in seconds
+      # events: []                         # Empty = all events (rule.violation, budget.exceeded, etc.)
+
+    # Optional: Alerting webhook for violations only
+    # - url: "https://alerts.example.com/tokenomics"
+    #   secret: "alerts-secret"
+    #   signing_key: "alerts-key"
+    #   events:
+    #     - "rule.violation"
+    #     - "budget.exceeded"
+    #     - "rate.limit.hit"
+
+    # Optional: Audit webhook for token lifecycle events
+    # - url: "https://audit.example.com/tokenomics"
+    #   signing_key: "audit-key"
+    #   events:
+    #     - "token.*"
+    #     - "server.start"
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Distributed Deployments (optional)
+# Uncomment to load tokens from a central config server
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# remote:
+#   url: "http://config-server:9090"
+#   api_key: "my-remote-key"
+#   sync: 300                # Poll every 5 min (0 = startup only)
+#   insecure: false
+#   webhook:
+#     enabled: true
+#     path: "/v1/webhook"
+#     secret: "my-webhook-secret"
+#     signing_key: "my-signing-key"
+#     auto_register: true
+#     callback_url: "http://this-proxy:8080/v1/webhook"

@@ -6,61 +6,62 @@
    |_|\___/|_|\_\___|_| |_|\___/|_| |_| |_|_|\___|___/
 ```
 
-> *Because sometimes the most important tokens aren't on the blockchain. They're on your OpenAI invoice.*
+> **Personal Guardrails for Token Usage** - Control costs, enforce safety, and track consumption across your AI agents.
 
-Tokenomics is an OpenAI-compatible reverse proxy that sits between your AI agents and your providers. Issue scoped wrapper tokens instead of sharing raw API keys. Each token is bound to a policy that controls what it can do, how much it can spend, and what gets recorded.
+Tokenomics is an OpenAI-compatible reverse proxy that acts as a guardrail system for LLM usage. Instead of giving agents direct access to your API keys, issue scoped wrapper tokens bound to guardrail policies. Each token controls what models can be used, how much can be spent, what content is allowed, and what gets recorded.
 
 One binary. Zero code changes. Drop it in front of any agent that speaks the OpenAI protocol.
 
 ## What It Does
 
-### Cost Control
+### 🛑 Cost Guardrails
 
-Cap spend before it happens. Every wrapper token has a budget, rate limits, and model restrictions. When the budget runs out, the proxy stops forwarding. No surprises on the invoice.
+Prevent overspending before it happens. Every wrapper token has a budget, rate limits, and model restrictions. When limits are reached, the proxy blocks requests—no surprises on the invoice.
 
-- **Token budgets** with per-token max_tokens caps
+- **Token budgets** with daily, hourly, and monthly caps
 - **Rate limiting** on requests/min, tokens/hour, and max parallel requests
-- **Model allowlists** so not every task burns through the flagship model
-- **Token expiration** with durations (24h, 7d) or exact timestamps
-- **Multi-provider routing** to send requests to the cheapest provider that fits
+- **Model allowlists** so not every task burns through your most expensive models
+- **Token expiration** with durations (24h, 7d) or exact timestamps for temporary access
+- **Multi-provider routing** to send requests to the cheapest provider that fits your constraints
 
-### Guardrails
+### 🔒 Safety Guardrails
 
-Content rules run on every request before it reaches the provider. Block prompt injections, redact PII, warn on sensitive patterns, or log everything for audit.
+Content inspection runs on every request before it reaches the provider. Detect and block prompt injections, redact PII, enforce output policies, or log everything for audit.
 
-- **Content rules** using regex, keyword, and PII detection with fail/warn/log/mask actions
-- **PII masking** that auto-redacts SSNs, credit cards, emails, API keys, and 7 more types
-- **System prompts** injected server-side so agents always get the right instructions
-- **Retry and fallback** chains that automatically try cheaper models on 429/5xx
+- **Jailbreak detection** blocks prompt injection attempts that try to override instructions
+- **PII masking** auto-redacts SSNs, credit cards, emails, API keys, private keys, and 6 more types
+- **Content rules** using regex, keyword, and pattern matching with fail/warn/log/mask actions
+- **System prompts** injected server-side so agents always operate under the right instructions
+- **Retry and fallback** chains automatically recover from provider failures with cheaper models
 
-### Shared Memory
+### 📋 Usage Tracking
 
-Every conversation that flows through the proxy can be recorded. Memory files are per-token markdown logs that capture the full user/assistant exchange. Store them on disk, in Redis, or both.
+Every conversation that flows through the proxy is optionally recorded. Session logs capture the full request/response exchange with cost details. Store on disk, in Redis, or both for team access.
 
-- **Per-token conversation logs** in markdown, grouped by session
-- **File or Redis backends** for local development or shared team access
-- **Configurable per policy**, so sensitive tokens skip memory while others record everything
-- **Pattern-based file naming** with `{token_hash}` and `{date}` placeholders
+- **Per-token conversation logs** in markdown, grouped by date and session
+- **File or Redis backends** for local development or shared team deployments
+- **Configurable per policy**, so sensitive tokens skip recording while others capture everything
+- **Pattern-based file naming** with `{token_hash}`, `{date}`, and `{token_hash}` placeholders
 
-### Session Ledger
+### 📊 Cost Attribution
 
-The ledger writes a JSON summary for every proxy session into a `.tokenomics/` directory in your project. Commit it alongside your code. Over time, you get a complete record of token consumption per feature, per branch, per developer.
+The ledger writes a JSON summary for every proxy session into a `.tokenomics/` directory. Commit it alongside your code. Over time, you get a complete record of token consumption per feature, per branch, per agent, per team.
 
 - **Per-session JSON** with request-level detail and rollups by model, provider, and token
-- **Git context** captures branch, start commit, and end commit for feature attribution
-- **Provider metadata** normalizes cached tokens, reasoning tokens, actual model served, and rate limits across OpenAI, Anthropic, Gemini, Azure, and Mistral
-- **CLI commands** (`ledger summary`, `ledger sessions`, `ledger show`) for viewing aggregated usage
-- **Cost-per-feature analysis** by committing `.tokenomics/` and querying by branch
+- **Git context** captures branch, start commit, and end commit for cost-per-feature analysis
+- **Provider metadata** normalizes cached tokens, reasoning tokens, actual model served, and rate limits
+- **CLI commands** (`ledger summary`, `ledger sessions`, `ledger show`) for usage analysis
+- **Cost-per-feature** attribution by committing `.tokenomics/` and querying by branch
 
-### Multi-Provider Routing
+### 🔄 Multi-Provider Support
 
-One wrapper token can route to any provider. The policy decides which API key to use based on the requested model. Switch providers without touching your agent code.
+One wrapper token can route to any provider. The policy decides which API key to use based on model and constraints. Switch providers without changing your agent code.
 
 Supported providers include OpenAI, Anthropic, Azure OpenAI, Google Gemini, Groq, Mistral, Cohere, Perplexity, DeepSeek, Together AI, Fireworks AI, Replicate, AWS Bedrock, and any OpenAI-compatible endpoint.
 
-### Observability
+### 🔍 Observability
 
-Every request produces a structured JSON log with token counts, latency, upstream IDs, rule match details, retry counts, and provider metadata. Webhooks fire on token CRUD, rule violations, budget alerts, rate limit hits, and request completion.
+Every request produces structured JSON logs with token counts, latency, upstream IDs, rule matches, retry counts, and provider details. Webhooks fire on token events, violations, budget alerts, rate limit hits, and completions.
 
 ## Installation
 
@@ -104,31 +105,35 @@ tokenomics run python my_script.py
 
 The `run` command starts the proxy, configures environment variables, runs your command, and cleans up. No separate server setup needed.
 
+**Default directory:** Tokenomics stores data (tokens, ledger, certs) in `~/.tokenomics/` by default. Use `--dir .tokenomics` to use the current directory, or `--dir /path` for a custom location.
+
 See [examples/](examples/) for provider configs, sample policies, and an end-to-end walkthrough.
 
 ## Features
 
-| Category | Feature | Description |
-|----------|---------|-------------|
-| **Cost** | Token budgets | Per-token max_tokens caps |
-| **Cost** | Rate limiting | Requests/min, tokens/hour, max parallel; sliding or fixed window |
-| **Cost** | Model allowlists | Exact match or regex model filtering |
-| **Cost** | Token expiration | Temporary access with durations (24h, 7d) or timestamps |
-| **Guardrails** | Content rules | Regex, keyword, and PII rules with fail/warn/log/mask actions |
-| **Guardrails** | PII masking | Auto-redact SSNs, credit cards, emails, API keys, and 7 more types |
-| **Guardrails** | System prompts | Server-side prompt injection on every request |
-| **Guardrails** | Retry and fallback | Auto-retry with model fallback chains on 429/5xx |
-| **Memory** | Conversation logs | Per-token markdown logs of user/assistant exchanges |
-| **Memory** | Redis backend | Shared memory across distributed agents |
-| **Ledger** | Session tracking | Per-session JSON with request-level detail and rollups |
-| **Ledger** | Git context | Branch, commit start/end for cost-per-feature analysis |
-| **Ledger** | Provider metadata | Cached tokens, reasoning tokens, actual model, rate limits |
-| **Ledger** | CLI commands | `ledger summary`, `ledger sessions`, `ledger show` |
-| **Routing** | Multi-provider | Route to OpenAI, Anthropic, Gemini, Groq, and 13 more |
-| **Routing** | Remote sync | Load tokens from a central config server via webhooks or polling |
-| **Observability** | Structured logging | JSON logs with rule matches, upstream IDs, and cost metadata |
-| **Observability** | Webhooks | Events for token CRUD, rule violations, budget alerts |
-| **Security** | Encryption | AES-256-GCM at-rest encryption for stored policies |
+| Guardrail Type | Feature | Description |
+|---|---|---|
+| **Cost Control** | Token budgets | Per-token daily/monthly spending caps |
+| **Cost Control** | Rate limiting | Requests/min, tokens/hour, max parallel; sliding or fixed window |
+| **Cost Control** | Model allowlists | Exact match or regex-based model filtering |
+| **Cost Control** | Token expiration | Temporary access with durations (24h, 7d) or timestamps |
+| **Safety** | Jailbreak detection | Detect prompt injection attempts that override instructions |
+| **Safety** | Content rules | Regex, keyword, and PII rules with fail/warn/log/mask actions |
+| **Safety** | PII masking | Auto-redact SSNs, credit cards, emails, API keys, and 7 more types |
+| **Safety** | System prompts | Server-side instruction injection on every request |
+| **Safety** | Retry and fallback | Auto-recover from failures with model fallback chains |
+| **Tracking** | Conversation logs | Per-token markdown logs of user/assistant exchanges |
+| **Tracking** | Redis backend | Shared memory across distributed agents |
+| **Tracking** | Session JSON | Per-session logs with request-level detail and rollups |
+| **Tracking** | Git context | Branch, commit start/end for cost-per-feature analysis |
+| **Tracking** | Provider metadata | Cached tokens, reasoning tokens, actual model, rate limits |
+| **Tracking** | CLI commands | `ledger summary`, `ledger sessions`, `ledger show` |
+| **Routing** | Multi-provider | Route to 17+ providers with model-based selection |
+| **Routing** | Remote sync | Load tokens from a central config server via webhooks |
+| **Observability** | Structured logging | JSON logs with rule matches, upstream IDs, and costs |
+| **Observability** | Webhooks | Events for violations, budget alerts, rate limits |
+| **Security** | Encryption | AES-256-GCM at-rest encryption for policies |
+| **Security** | Token isolation | Scoped wrapper tokens instead of raw API keys |
 
 ## Documentation
 
@@ -147,6 +152,19 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 | [Multi-Model Routing](docs/MULTI_MODEL_ROUTING.md) | Provider routing, model matching, auth schemes, fallback chains |
 | [Session Ledger](docs/LEDGER.md) | Per-session token tracking, CLI commands, session JSON format |
 | [Distribution](docs/DISTRIBUTION.md) | Installation methods, pre-built binaries, release process |
+| [OpenClaw Integration](docs/OPENCLAW.md) | Connect OpenClaw agents to Tokenomics guardrails |
+
+## OpenClaw Integration
+
+Tokenomics provides personal guardrails for OpenClaw autonomous agents. Set budgets, enforce safety policies, and track costs across distributed agent fleets—all without modifying agent code.
+
+**Example:** Run a Slack bot with:
+- Daily budget: 1M tokens
+- Safety rules: Block jailbreaks, mask PII, detect injection attempts
+- Fallback providers: Try Anthropic if OpenAI is over capacity
+- Usage tracking: Record conversations and cost attribution
+
+See [examples/openclaw](examples/openclaw/) for complete examples (Slack, Discord, personal assistant) and [docs/OPENCLAW.md](docs/OPENCLAW.md) for the integration guide.
 
 ## Author
 

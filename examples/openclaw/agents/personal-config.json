@@ -1,0 +1,91 @@
+{
+  "agent": {
+    "id": "personal-assistant",
+    "name": "Personal Assistant",
+    "type": "personal",
+    "environment": "production",
+    "platforms": ["ios", "macos", "android"]
+  },
+
+  "llm": {
+    "type": "openai-compatible",
+    "api_url": "https://tokenomics.example.com",
+    "api_key": "{{TOKEN_HASH_FROM_TOKEN_CREATE}}",
+    "model": "gpt-4-turbo",
+    "temperature": 0.7,
+    "max_tokens": 2000,
+    "timeout_ms": 30000,
+    "fallback_models": [
+      "gpt-3.5-turbo",
+      "claude-opus",
+      "claude-haiku"
+    ]
+  },
+
+  "platforms": {
+    "ios": {
+      "enabled": true,
+      "siri_integration": true
+    },
+    "macos": {
+      "enabled": true,
+      "menubar_integration": true,
+      "keyboard_shortcut": "cmd+shift+a"
+    },
+    "android": {
+      "enabled": true,
+      "home_screen_widget": true
+    }
+  },
+
+  "logging": {
+    "level": "info",
+    "file": "~/.openclaw/logs/personal-assistant.log"
+  },
+
+  "skills": {
+    "enabled": [
+      "web_search",
+      "email_integration",
+      "calendar_integration",
+      "file_operations",
+      "reminders",
+      "notes",
+      "contacts"
+    ],
+    "max_concurrent": 2,
+    "security_policies": {
+      "disable_shell": true,
+      "disable_file_write": false,
+      "allowed_domains": ["*"]
+    }
+  },
+
+  "privacy": {
+    "encrypt_local_storage": true,
+    "sync_to_cloud": false,
+    "local_inference_preferred": true
+  },
+
+  "budgets": {
+    "daily_tokens": 100000,
+    "monthly_tokens": 3000000,
+    "soft_limit_percent": 80,
+    "hard_limit_action": "warn",
+    "currency": "USD",
+    "monthly_cost_limit": 50
+  },
+
+  "monitoring": {
+    "enabled": true,
+    "webhook_url": "https://tokenomics.example.com/webhooks/openclaw",
+    "log_level": "info",
+    "log_file": "~/.openclaw/logs/personal-assistant.log"
+  },
+
+  "metadata": {
+    "user_id": "user-123",
+    "cost_center": "personal",
+    "device_count": 3
+  }
+}

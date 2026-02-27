@@ -139,8 +139,15 @@ func (r *Rule) compile() error {
 		}
 		r.compiledPII = detectors
 
+	case "jailbreak":
+		// Jailbreak detection doesn't require additional parameters
+		// Just validate that pattern, keywords, or detect fields are not used
+		if r.Pattern != "" || len(r.Keywords) > 0 || len(r.Detect) > 0 {
+			return fmt.Errorf("jailbreak rule should not have pattern, keywords, or detect fields")
+		}
+
 	default:
-		return fmt.Errorf("invalid rule type %q; must be regex, keyword, or pii", r.Type)
+		return fmt.Errorf("invalid rule type %q; must be regex, keyword, pii, or jailbreak", r.Type)
 	}
 
 	return nil
@@ -190,6 +197,15 @@ func (r *Rule) matches(content string) string {
 			}
 			return fmt.Sprintf("detected PII in rule %q: %s", name, strings.Join(types, ", "))
 		}
+
+	case "jailbreak":
+		if detectJailbreakFast(content) {
+			name := r.Name
+			if name == "" {
+				name = "jailbreak"
+			}
+			return fmt.Sprintf("detected jailbreak attempt in rule %q", name)
+		}
 	}
 	return ""
 }
@@ -207,6 +223,12 @@ func (r *Rule) maskContent(content string) string {
 		}
 	case "pii":
 		content = maskPII(content, r.compiledPII)
+	case "jailbreak":
+		// Jailbreak attempts are typically blocked/warned, but if action is mask,
+		// replace the entire content with a redaction marker
+		if detectJailbreakFast(content) {
+			return "[JAILBREAK_ATTEMPT_REDACTED]"
+		}
 	}
 	return content
 }

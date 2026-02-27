@@ -16,7 +16,7 @@ import (
 	"github.com/rickcrawford/tokenomics/internal/policy"
 )
 
-func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time) {
+func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *policy.Policy, tokenHash, upstream string, start time.Time, openClawMeta OpenClawMetadata) {
 	// Log policy lookup for passthrough
 	debugLog("Passthrough - Policy loaded for token %s", safePrefix(tokenHash, 16))
 	debugLog("Passthrough - BaseKeyEnv: %s", pol.BaseKeyEnv)
@@ -63,6 +63,7 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 		UpstreamURL: upstream,
 		RemoteAddr:  r.RemoteAddr,
 		UserAgent:   r.UserAgent(),
+		Metadata:    openClawMetadataToMap(openClawMeta),
 	}
 	defer func() {
 		logEntry.DurationMs = time.Since(start).Milliseconds()

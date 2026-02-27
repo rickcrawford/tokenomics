@@ -1,0 +1,96 @@
+{
+  "base_key_env": "OPENAI_PAT",
+  "max_tokens": 200000,
+
+  "providers": {
+    "openai": [
+      {
+        "base_key_env": "OPENAI_PAT",
+        "model": "gpt-4-turbo",
+        "max_tokens": 2000
+      },
+      {
+        "base_key_env": "OPENAI_PAT",
+        "model_regex": "^gpt-3\\.5.*",
+        "max_tokens": 4000
+      }
+    ],
+    "anthropic": [
+      {
+        "base_key_env": "ANTHROPIC_PAT",
+        "model": "claude-opus",
+        "max_tokens": 2000
+      },
+      {
+        "base_key_env": "ANTHROPIC_PAT",
+        "model": "claude-haiku",
+        "max_tokens": 4000
+      }
+    ]
+  },
+
+  "memory": {
+    "enabled": true,
+    "file_path": ".tokenomics/memory",
+    "file_name": "{date}/{token_hash}.md"
+  },
+
+  "rate_limit": {
+    "rules": [
+      {
+        "requests": 20,
+        "window": "1m",
+        "strategy": "sliding"
+      },
+      {
+        "tokens": 200000,
+        "window": "30d",
+        "strategy": "fixed"
+      }
+    ],
+    "max_parallel": 2
+  },
+
+  "retry": {
+    "max_retries": 3,
+    "retry_on": [429, 500, 502, 503]
+  },
+
+  "rules": [
+    {
+      "name": "Block jailbreak attempts",
+      "type": "jailbreak",
+      "action": "fail",
+      "scope": "input"
+    },
+    {
+      "name": "Mask all PII in input",
+      "type": "pii",
+      "detect": ["email", "phone", "ssn", "credit_card", "aws_key"],
+      "action": "mask",
+      "scope": "input"
+    },
+    {
+      "name": "Mask secrets everywhere",
+      "type": "pii",
+      "detect": ["api_key", "private_key", "jwt", "github_token", "connection_string"],
+      "action": "mask",
+      "scope": "both"
+    },
+    {
+      "name": "Warn on suspicious patterns",
+      "type": "regex",
+      "pattern": "(?i)(password|secret|token|api.?key)\\s*[:=]",
+      "action": "warn",
+      "scope": "both"
+    }
+  ],
+
+  "metadata": {
+    "agent_id": "personal-assistant",
+    "agent_type": "personal",
+    "team": "individual",
+    "environment": "personal",
+    "cost_center": "personal"
+  }
+}
