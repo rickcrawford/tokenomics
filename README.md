@@ -153,7 +153,7 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 | [Multi-Model Routing](docs/MULTI_MODEL_ROUTING.md) | Provider routing, model matching, auth schemes, fallback chains |
 | [Session Ledger](docs/LEDGER.md) | Per-session token tracking, CLI commands, session JSON format |
 | [Distribution](docs/DISTRIBUTION.md) | Installation methods, pre-built binaries, release process |
-| [OpenClaw Integration](docs/OPENCLAW.md) | Connect OpenClaw agents to Tokenomics guardrails |
+| [OpenClaw Integration](docs/OPENCLAW_INTEGRATION.md) | Connect OpenClaw agents to Tokenomics guardrails |
 
 ## OpenClaw Integration
 
@@ -165,7 +165,7 @@ Tokenomics provides personal guardrails for OpenClaw autonomous agents. Set budg
 - Fallback providers: Try Anthropic if OpenAI is over capacity
 - Usage tracking: Record conversations and cost attribution
 
-See [examples/openclaw](examples/openclaw/) for complete examples (Slack, Discord, personal assistant) and [docs/OPENCLAW.md](docs/OPENCLAW.md) for the integration guide.
+See [examples/openclaw](examples/openclaw/) for complete examples (Slack, Discord, personal assistant) and [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md) for the integration guide.
 
 ## Author
 
