@@ -86,14 +86,14 @@ Full guide: [Quick Start](docs/QUICK_START.md).
 **1. Set environment variables**
 
 ```bash
-export OPENAI_API_KEY="<your-openai-api-key>"
+export OPENAI_PAT="<your-openai-api-key>"
 export TOKENOMICS_HASH_KEY="<any-random-secret-string>"
 ```
 
 **2. Create a wrapper token**
 
 ```bash
-tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}'
+tokenomics token create --policy '{"base_key_env":"OPENAI_PAT"}'
 ```
 
 **3. Run**
@@ -143,6 +143,7 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 | [Quick Start](docs/QUICK_START.md) | Fast setup and first request in minutes |
 | [Examples](examples/) | Provider configs, sample policies, webhook collector, env template |
 | [Configuration](docs/CONFIGURATION.md) | config.yaml fields, environment variables, CLI flags |
+| [Secrets & Environment](docs/SECRETS.md) | API key management, .env file handling, secret rotation |
 | [Policies](docs/POLICIES.md) | Policy JSON schema, model filtering, rules, prompts, memory |
 | [Token Management](docs/TOKEN_MANAGEMENT.md) | Creating, inspecting, updating, and deleting tokens |
 | [Agent Integration](docs/AGENT_INTEGRATION.md) | Connecting agents via `run`, `init`, or manual proxy setup |

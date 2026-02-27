@@ -34,12 +34,12 @@ For example, if your config has:
 ```yaml
 providers:
   anthropic:
-    api_key_env: MY_ANTHROPIC_API_KEY_NEW
+    api_key_env: MY_ANTHROPIC_PAT_NEW
 ```
 
 Then your token policy must use:
 ```json
-"base_key_env": "MY_ANTHROPIC_API_KEY_NEW"
+"base_key_env": "MY_ANTHROPIC_PAT_NEW"
 ```
 
 **If they don't match**, the proxy won't find the real API key and will return a 401 error.
@@ -58,7 +58,7 @@ Example:
 export TOKENOMICS_HASH_KEY="my-secret-hash-key"
 
 ./bin/tokenomics token create --policy '{
-  "base_key_env": "MY_ANTHROPIC_API_KEY_NEW",
+  "base_key_env": "MY_ANTHROPIC_PAT_NEW",
   "max_tokens": 100000
 }'
 ```
@@ -81,12 +81,12 @@ Add `--expires` to set an expiration on the token:
 
 ```bash
 # Duration-based (relative to now)
-./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}' --expires 24h
-./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}' --expires 7d
-./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}' --expires 1y
+./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_PAT"}' --expires 24h
+./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_PAT"}' --expires 7d
+./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_PAT"}' --expires 1y
 
 # Exact timestamp
-./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}' --expires 2025-12-31T00:00:00Z
+./bin/tokenomics token create --policy '{"base_key_env":"OPENAI_PAT"}' --expires 2025-12-31T00:00:00Z
 ```
 
 Supported formats: Go durations (`24h`, `168h`), day shorthand (`7d`, `30d`), year shorthand (`1y`), or RFC3339 timestamps. When a token expires, requests using it are rejected and a `token.expired` event is emitted.
@@ -113,7 +113,7 @@ Created:    2025-01-15 10:30:00 +0000 UTC
 Expires:    2025-02-15T10:30:00Z (active)
 Policy:
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "max_tokens": 100000
 }
 ```
@@ -130,7 +130,7 @@ Update a token's policy, expiration, or both. At least one of `--policy` or `--e
 
 ```bash
 # Update the policy
-./bin/tokenomics token update --hash 9f86d0818... --policy '{"base_key_env":"OPENAI_API_KEY","max_tokens":200000}'
+./bin/tokenomics token update --hash 9f86d0818... --policy '{"base_key_env":"OPENAI_PAT","max_tokens":200000}'
 
 # Extend the expiration
 ./bin/tokenomics token update --hash 9f86d0818... --expires 30d
@@ -156,7 +156,7 @@ Displays all stored token hashes along with their policy details:
 Hash:       9f86d0818...
 Created:    2025-01-15 10:30:00 +0000 UTC
 Expires:    2025-02-15T10:30:00Z (active)
-Key Env:    OPENAI_API_KEY
+Key Env:    OPENAI_PAT
 Model Regex: ^gpt-4.*
 Max Tokens: 100000
 Prompts:    0

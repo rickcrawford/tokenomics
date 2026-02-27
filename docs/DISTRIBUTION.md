@@ -94,8 +94,8 @@ mkdir -p ~/.tokenomics
 cp docs/config.yaml.example ~/.tokenomics/config.yaml
 
 # Set API keys
-export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_PAT="sk-..."
+export ANTHROPIC_PAT="sk-ant-..."
 export TOKENOMICS_HASH_KEY="your-secret-hash-key"
 ```
 

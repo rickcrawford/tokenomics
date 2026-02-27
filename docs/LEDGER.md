@@ -204,8 +204,8 @@ By Model:
 
 By Provider:
   NAME                REQUESTS  INPUT   OUTPUT  TOTAL
-  ANTHROPIC_API_KEY   120       400000  250000  650000
-  OPENAI_API_KEY      79        295000  188000  483000
+  ANTHROPIC_PAT   120       400000  250000  650000
+  OPENAI_PAT      79        295000  188000  483000
 ```
 
 ### `tokenomics ledger sessions`

@@ -10,7 +10,7 @@ A policy is a JSON object passed to `token create --policy`:
 
 ```json
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "upstream_url": "https://api.openai.com",
   "max_tokens": 100000,
   "model_regex": "^gpt-4.*",
@@ -26,20 +26,20 @@ A policy is a JSON object passed to `token create --policy`:
   "providers": {
     "openai": [
       {
-        "base_key_env": "OPENAI_API_KEY",
+        "base_key_env": "OPENAI_PAT",
         "model": "gpt-4o",
         "max_tokens": 50000,
         "timeout": 120
       },
       {
-        "base_key_env": "OPENAI_API_KEY",
+        "base_key_env": "OPENAI_PAT",
         "model_regex": "^gpt-3\\.5",
         "max_tokens": 200000
       }
     ],
     "anthropic": [
       {
-        "base_key_env": "ANTHROPIC_API_KEY",
+        "base_key_env": "ANTHROPIC_PAT",
         "upstream_url": "https://api.anthropic.com",
         "model_regex": "^claude",
         "prompts": [{ "role": "system", "content": "Be concise." }]
@@ -93,7 +93,7 @@ If no provider policy matches the requested model, the global policy is used as-
 The name of the environment variable holding the real API key.
 
 ```json
-{ "base_key_env": "OPENAI_API_KEY" }
+{ "base_key_env": "OPENAI_PAT" }
 ```
 
 Either this or at least one provider with `base_key_env` must be set.
@@ -215,14 +215,14 @@ Provider connection details (upstream URLs, authentication, headers) are defined
 providers:
   openai:
     upstream_url: https://api.openai.com
-    api_key_env: OPENAI_API_KEY
+    api_key_env: OPENAI_PAT
     models:
       - gpt-4o
       - gpt-4o-mini
 
   anthropic:
     upstream_url: https://api.anthropic.com
-    api_key_env: ANTHROPIC_API_KEY
+    api_key_env: ANTHROPIC_PAT
     auth_scheme: header
     auth_header: x-api-key
     headers:
@@ -258,7 +258,7 @@ The Tokenomics proxy accepts wrapper tokens from clients in multiple formats to 
 - **`Authorization: Bearer {token}`** — OpenAI SDK, curl, generic clients
 - **`Authorization: {token}`** — Raw token format for backward compatibility
 
-All formats are equivalent. Use whichever matches your client library. Environment variables (e.g., `ANTHROPIC_API_KEY`) are automatically converted to the appropriate header format by the SDK.
+All formats are equivalent. Use whichever matches your client library. Environment variables (e.g., `ANTHROPIC_PAT`) are automatically converted to the appropriate header format by the SDK.
 
 #### Upstream Auth Schemes
 
@@ -490,7 +490,7 @@ Entries are pushed to `tokenomics:memory:<session_id>` using RPUSH.
 ### Single provider, minimal
 
 ```json
-{ "base_key_env": "OPENAI_API_KEY" }
+{ "base_key_env": "OPENAI_PAT" }
 ```
 
 ### Multi-provider with model routing
@@ -499,25 +499,25 @@ One token works with both OpenAI and Anthropic. The proxy routes based on model 
 
 ```json
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "max_tokens": 100000,
   "prompts": [{ "role": "system", "content": "Be helpful." }],
   "providers": {
     "openai": [
       {
-        "base_key_env": "OPENAI_API_KEY",
+        "base_key_env": "OPENAI_PAT",
         "model_regex": "^gpt-4",
         "max_tokens": 50000
       },
       {
-        "base_key_env": "OPENAI_API_KEY",
+        "base_key_env": "OPENAI_PAT",
         "model_regex": "^gpt-3",
         "max_tokens": 200000
       }
     ],
     "anthropic": [
       {
-        "base_key_env": "ANTHROPIC_API_KEY",
+        "base_key_env": "ANTHROPIC_PAT",
         "upstream_url": "https://api.anthropic.com",
         "model_regex": "^claude"
       }
@@ -526,13 +526,13 @@ One token works with both OpenAI and Anthropic. The proxy routes based on model 
 }
 ```
 
-When a request comes in for `claude-3-opus`, the proxy matches the Anthropic provider policy, uses `ANTHROPIC_API_KEY`, routes to `https://api.anthropic.com`, and prepends the global "Be helpful." prompt.
+When a request comes in for `claude-3-opus`, the proxy matches the Anthropic provider policy, uses `ANTHROPIC_PAT`, routes to `https://api.anthropic.com`, and prepends the global "Be helpful." prompt.
 
 ### Locked-down policy with content rules and memory
 
 ```json
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "model": "gpt-4o-mini",
   "max_tokens": 10000,
   "prompts": [
@@ -561,12 +561,12 @@ Different token budgets for expensive vs cheap models:
   "providers": {
     "openai": [
       {
-        "base_key_env": "OPENAI_API_KEY",
+        "base_key_env": "OPENAI_PAT",
         "model": "gpt-4o",
         "max_tokens": 10000
       },
       {
-        "base_key_env": "OPENAI_API_KEY",
+        "base_key_env": "OPENAI_PAT",
         "model_regex": "^gpt-4o-mini",
         "max_tokens": 500000
       }
@@ -579,7 +579,7 @@ Different token budgets for expensive vs cheap models:
 
 ```json
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "timeout": 60,
   "rate_limit": {
     "rules": [
@@ -605,7 +605,7 @@ If a request to `gpt-4o` fails with a 429 or 5xx, the proxy retries up to 2 time
 
 ```json
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "max_tokens": 500000,
   "timeout": 30,
   "prompts": [{ "role": "system", "content": "You are a helpful customer support agent." }],
@@ -640,13 +640,13 @@ If a request to `gpt-4o` fails with a 429 or 5xx, the proxy retries up to 2 time
   "providers": {
     "openai": [
       {
-        "base_key_env": "OPENAI_API_KEY",
+        "base_key_env": "OPENAI_PAT",
         "model": "gpt-4o",
         "timeout": 120,
         "max_tokens": 100000
       },
       {
-        "base_key_env": "OPENAI_API_KEY",
+        "base_key_env": "OPENAI_PAT",
         "model_regex": "^gpt-4o-mini",
         "max_tokens": 500000
       }

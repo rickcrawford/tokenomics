@@ -39,11 +39,11 @@ Defines connection details for each provider: upstream URL, auth scheme, custom 
 providers:
   openai:
     upstream_url: https://api.openai.com
-    api_key_env: OPENAI_API_KEY
+    api_key_env: OPENAI_PAT
 
   anthropic:
     upstream_url: https://api.anthropic.com
-    api_key_env: ANTHROPIC_API_KEY
+    api_key_env: ANTHROPIC_PAT
     auth_scheme: header
     auth_header: x-api-key
     headers:
@@ -63,16 +63,16 @@ Defines which models are allowed, which provider handles each model, and per-mod
 
 ```json
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "max_tokens": 100000,
   "prompts": [{"role": "system", "content": "Be helpful."}],
   "providers": {
     "openai": [
-      {"base_key_env": "OPENAI_API_KEY", "model": "gpt-4o", "max_tokens": 50000},
-      {"base_key_env": "OPENAI_API_KEY", "model_regex": "^gpt-3\\.5", "max_tokens": 200000}
+      {"base_key_env": "OPENAI_PAT", "model": "gpt-4o", "max_tokens": 50000},
+      {"base_key_env": "OPENAI_PAT", "model_regex": "^gpt-3\\.5", "max_tokens": 200000}
     ],
     "anthropic": [
-      {"base_key_env": "ANTHROPIC_API_KEY", "model_regex": "^claude"}
+      {"base_key_env": "ANTHROPIC_PAT", "model_regex": "^claude"}
     ],
     "groq": [
       {"base_key_env": "GROQ_API_KEY", "model_regex": "^llama"}
@@ -190,7 +190,7 @@ The `run` command starts the proxy, sets environment variables for the provider,
 One API key, one provider. The simplest case.
 
 ```json
-{"base_key_env": "OPENAI_API_KEY"}
+{"base_key_env": "OPENAI_PAT"}
 ```
 
 All requests go to OpenAI using the global upstream URL.
@@ -199,13 +199,13 @@ All requests go to OpenAI using the global upstream URL.
 
 ```json
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "providers": {
     "openai": [
-      {"base_key_env": "OPENAI_API_KEY", "model_regex": "^gpt-"}
+      {"base_key_env": "OPENAI_PAT", "model_regex": "^gpt-"}
     ],
     "anthropic": [
-      {"base_key_env": "ANTHROPIC_API_KEY", "model_regex": "^claude"}
+      {"base_key_env": "ANTHROPIC_PAT", "model_regex": "^claude"}
     ]
   }
 }
@@ -219,8 +219,8 @@ Requests for `gpt-4o` go to OpenAI. Requests for `claude-3-opus` go to Anthropic
 {
   "providers": {
     "openai": [
-      {"base_key_env": "OPENAI_API_KEY", "model": "gpt-4o", "max_tokens": 10000},
-      {"base_key_env": "OPENAI_API_KEY", "model_regex": "^gpt-4o-mini", "max_tokens": 500000}
+      {"base_key_env": "OPENAI_PAT", "model": "gpt-4o", "max_tokens": 10000},
+      {"base_key_env": "OPENAI_PAT", "model_regex": "^gpt-4o-mini", "max_tokens": 500000}
     ]
   }
 }
@@ -232,17 +232,17 @@ Expensive models get tight budgets. Cheap models get generous limits.
 
 ```json
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "retry": {
     "max_retries": 2,
     "fallbacks": ["gpt-4o-mini"]
   },
   "providers": {
     "openai": [
-      {"base_key_env": "OPENAI_API_KEY", "model_regex": "^gpt-"}
+      {"base_key_env": "OPENAI_PAT", "model_regex": "^gpt-"}
     ],
     "anthropic": [
-      {"base_key_env": "ANTHROPIC_API_KEY", "model_regex": "^claude"}
+      {"base_key_env": "ANTHROPIC_PAT", "model_regex": "^claude"}
     ],
     "groq": [
       {"base_key_env": "GROQ_API_KEY", "model_regex": "^llama"}
@@ -257,12 +257,12 @@ If the primary model fails, the proxy falls back to `gpt-4o-mini` via OpenAI.
 
 ```json
 {
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "prompts": [{"role": "system", "content": "Be helpful."}],
   "rules": [{"type": "pii", "detect": ["ssn"], "action": "mask", "scope": "both"}],
   "providers": {
     "anthropic": [{
-      "base_key_env": "ANTHROPIC_API_KEY",
+      "base_key_env": "ANTHROPIC_PAT",
       "model_regex": "^claude",
       "prompts": [{"role": "system", "content": "Be concise."}],
       "rules": [{"type": "keyword", "keywords": ["confidential"], "action": "fail"}]

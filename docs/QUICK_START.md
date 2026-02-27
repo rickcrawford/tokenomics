@@ -24,11 +24,11 @@ Two variables are required:
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | The real provider API key you want to wrap |
+| `OPENAI_PAT` | The real provider API key you want to wrap |
 | `TOKENOMICS_HASH_KEY` | Secret used to hash wrapper tokens (pick any random string) |
 
 ```bash
-export OPENAI_API_KEY="<your-openai-api-key>"
+export OPENAI_PAT="<your-openai-api-key>"
 export TOKENOMICS_HASH_KEY="<any-random-secret-string>"
 ```
 
@@ -37,7 +37,7 @@ export TOKENOMICS_HASH_KEY="<any-random-secret-string>"
 Create a wrapper token that wraps your OpenAI key:
 
 ```bash
-tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}'
+tokenomics token create --policy '{"base_key_env":"OPENAI_PAT"}'
 ```
 
 Copy the returned token (`tkn_...`) and run a command through the proxy:
@@ -51,7 +51,7 @@ The `run` command handles everything: it starts the proxy, configures environmen
 
 ## What just happened?
 
-1. Your real API key (`OPENAI_API_KEY`) stays on the server, never exposed to the command.
+1. Your real API key (`OPENAI_PAT`) stays on the server, never exposed to the command.
 2. The wrapper token (`tkn_...`) is what the command sees. It has no direct access to the real key.
 3. The proxy started on `http://localhost:8080`, forwarded the request to OpenAI, and shut down after the command finished.
 

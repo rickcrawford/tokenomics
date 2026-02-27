@@ -33,7 +33,7 @@ Example log entry:
   "path": "/v1/chat/completions",
   "token_hash": "9f86d081884c...",
   "model": "gpt-4o",
-  "base_key_env": "OPENAI_API_KEY",
+  "base_key_env": "OPENAI_PAT",
   "upstream_url": "https://api.openai.com",
   "status_code": 200,
   "duration_ms": 1234,
@@ -69,7 +69,7 @@ curl http://localhost:8080/stats
   "by_model_and_key": [
     {
       "model": "gpt-4o",
-      "base_key_env": "OPENAI_API_KEY",
+      "base_key_env": "OPENAI_PAT",
       "request_count": 100,
       "input_tokens": 30000,
       "output_tokens": 20000,
@@ -78,7 +78,7 @@ curl http://localhost:8080/stats
     },
     {
       "model": "gpt-4o-mini",
-      "base_key_env": "OPENAI_API_KEY",
+      "base_key_env": "OPENAI_PAT",
       "request_count": 50,
       "input_tokens": 15000,
       "output_tokens": 10000,
@@ -95,7 +95,7 @@ curl http://localhost:8080/stats
       "total_tokens": 37000,
       "error_count": 0,
       "last_model": "gpt-4o",
-      "base_key_env": "OPENAI_API_KEY",
+      "base_key_env": "OPENAI_PAT",
       "first_seen": "2025-01-15T10:00:00Z",
       "last_seen": "2025-01-15T11:30:00Z"
     }

@@ -213,7 +213,7 @@ These are not config fields but are read directly at runtime:
 | Variable | Purpose |
 |---|---|
 | `TOKENOMICS_HASH_KEY` | The HMAC secret key used to hash wrapper tokens. Required for `token create` and `serve`. |
-| Whatever `base_key_env` points to (e.g. `OPENAI_API_KEY`) | The real upstream API key. Resolved per-policy at request time. |
+| Whatever `base_key_env` points to (e.g. `OPENAI_PAT`) | The real upstream API key. Resolved per-policy at request time. |
 
 ## CLI Flags
 

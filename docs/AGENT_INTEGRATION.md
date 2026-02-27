@@ -18,10 +18,10 @@ There are three commands for connecting agents to the proxy:
 ## Quick Start: `tokenomics run` (Recommended)
 
 ```bash
-export OPENAI_API_KEY="<your-openai-api-key>"
+export OPENAI_PAT="<your-openai-api-key>"
 export TOKENOMICS_HASH_KEY="<any-random-secret-string>"
 
-tokenomics token create --policy '{"base_key_env":"OPENAI_API_KEY"}'
+tokenomics token create --policy '{"base_key_env":"OPENAI_PAT"}'
 # Copy the returned tkn_... value
 
 export TOKENOMICS_KEY="tkn_<paste-your-token-here>"
@@ -193,7 +193,7 @@ tokenomics init --token tkn_abc123 --provider generic --output shell
 
 Output:
 ```bash
-export OPENAI_API_KEY="tkn_abc123"
+export OPENAI_PAT="tkn_abc123"
 export OPENAI_BASE_URL="https://localhost:8443/v1"
 export NODE_TLS_REJECT_UNAUTHORIZED="0"
 ```
@@ -217,7 +217,7 @@ tokenomics init --token tkn_abc123 --output json
 Output:
 ```json
 {
-  "OPENAI_API_KEY": "tkn_abc123",
+  "OPENAI_PAT": "tkn_abc123",
   "OPENAI_BASE_URL": "https://localhost:8443/v1",
   "NODE_TLS_REJECT_UNAUTHORIZED": "0"
 }
@@ -235,7 +235,7 @@ tokenomics run python my_script.py
 
 Configures:
 ```bash
-OPENAI_API_KEY=tkn_...
+OPENAI_PAT=tkn_...
 OPENAI_BASE_URL=https://localhost:8443/v1
 ```
 
@@ -247,7 +247,7 @@ tokenomics run claude "What is AI?"
 
 Configures:
 ```bash
-ANTHROPIC_API_KEY=tkn_...
+ANTHROPIC_PAT=tkn_...
 ANTHROPIC_BASE_URL=https://localhost:8443
 ```
 
@@ -259,7 +259,7 @@ tokenomics run --provider azure -- python my_script.py
 
 Configures:
 ```bash
-AZURE_OPENAI_API_KEY=tkn_...
+AZURE_OPENAI_PAT=tkn_...
 AZURE_OPENAI_ENDPOINT=https://localhost:8443
 ```
 
@@ -284,7 +284,7 @@ Tokenomics automatically loads `.env` from the current directory or `~/.tokenomi
 ```bash
 # .env
 TOKENOMICS_KEY=tkn_my-wrapper-token
-OPENAI_API_KEY=sk-...  # Real provider keys (optional)
+OPENAI_PAT=sk-...  # Real provider keys (optional)
 ```
 
 Then just run:
@@ -308,8 +308,8 @@ For production, use a secrets manager or `.env` file that's not committed to ver
 ```bash
 # In .env (don't commit to git)
 TOKENOMICS_KEY=tkn_...
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_PAT=sk-...
+ANTHROPIC_PAT=sk-ant-...
 ```
 
 Add to `.gitignore`:
