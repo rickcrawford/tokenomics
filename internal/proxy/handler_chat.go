@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -596,8 +597,8 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 			if !isError {
 				// Record full response to memory (non-streaming)
 				if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
-					respBodyStr := string(respBody)
-					if err := memWriter.Append(tokenHash, "response", tryModel, respBodyStr); err != nil {
+					respFormatted := formatResponseForMemory(respBody, resp.Header.Get("Content-Type"))
+					if err := memWriter.Append(tokenHash, "response", tryModel, respFormatted); err != nil {
 						debugLog("Failed to record response to memory: %v", err)
 					}
 				}
@@ -639,8 +640,8 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request, 
 					if err := h.ledger.RecordMemory(tokenHash, "request", tryModel, reqBodyStr); err != nil {
 						debugLog("Failed to record request to ledger: %v", err)
 					}
-					respBodyStr := string(respBody)
-					if err := h.ledger.RecordMemory(tokenHash, "response", tryModel, respBodyStr); err != nil {
+					respFormatted := formatResponseForMemory(respBody, resp.Header.Get("Content-Type"))
+					if err := h.ledger.RecordMemory(tokenHash, "response", tryModel, respFormatted); err != nil {
 						debugLog("Failed to record response to ledger: %v", err)
 					}
 				}
@@ -916,4 +917,90 @@ func extractAssistantContent(body []byte) string {
 	}
 	content, _ := msg["content"].(string)
 	return content
+}
+
+// decompressResponseBody attempts to decompress gzip-compressed response body.
+// If the body is not gzipped, returns the original body.
+func decompressResponseBody(body []byte, contentEncoding string) []byte {
+	// Check if response is gzip-compressed
+	if !strings.Contains(strings.ToLower(contentEncoding), "gzip") {
+		return body
+	}
+
+	// Try to decompress
+	reader, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		// Not actually gzipped despite header, return original
+		return body
+	}
+	defer reader.Close()
+
+	decompressed, err := io.ReadAll(io.LimitReader(reader, maxResponseBodySize))
+	if err != nil {
+		// Decompression failed, return original
+		return body
+	}
+	return decompressed
+}
+
+// formatResponseForMemory extracts and formats the response content as clean markdown.
+// For JSON responses, it parses and extracts the assistant content.
+// For other content types, returns a brief summary.
+func formatResponseForMemory(body []byte, contentType string) string {
+	// Try to parse as JSON (most API responses are JSON)
+	var resp map[string]interface{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		// Not JSON, return sanitized version of raw response
+		// Don't return binary/garbled data, just indicate it's non-JSON
+		str := string(body)
+		if len(str) > 500 {
+			return fmt.Sprintf("[Non-JSON response, %d bytes]\n\n%s...", len(body), str[:500])
+		}
+		return fmt.Sprintf("[Non-JSON response]\n\n%s", str)
+	}
+
+	// Extract common response fields
+	var result strings.Builder
+
+	// Check for error in response
+	if errMsg, ok := resp["error"].(map[string]interface{}); ok {
+		if msg, ok := errMsg["message"].(string); ok {
+			result.WriteString(fmt.Sprintf("**Error:** %s\n\n", msg))
+		}
+	}
+
+	// Extract assistant content if available
+	if choices, ok := resp["choices"].([]interface{}); ok && len(choices) > 0 {
+		choice := choices[0]
+		if choiceMap, ok := choice.(map[string]interface{}); ok {
+			if msg, ok := choiceMap["message"].(map[string]interface{}); ok {
+				if content, ok := msg["content"].(string); ok {
+					result.WriteString(content)
+					return result.String()
+				}
+			}
+			if delta, ok := choiceMap["delta"].(map[string]interface{}); ok {
+				if content, ok := delta["content"].(string); ok {
+					result.WriteString(content)
+					return result.String()
+				}
+			}
+		}
+	}
+
+	// If we got JSON but couldn't extract content, return a summary
+	result.WriteString(fmt.Sprintf("[API Response: %d bytes]\n\n", len(body)))
+
+	// Pretty-print the JSON (truncated)
+	prettyJSON, err := json.MarshalIndent(resp, "", "  ")
+	if err == nil && len(prettyJSON) > 0 {
+		str := string(prettyJSON)
+		if len(str) > 1000 {
+			result.WriteString(str[:1000])
+			result.WriteString("\n...[truncated]")
+		} else {
+			result.WriteString(str)
+		}
+	}
+	return result.String()
 }

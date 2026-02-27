@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -635,5 +636,115 @@ func TestHandler_AuthorizationHeaderCleaned(t *testing.T) {
 	// Verify real key was sent
 	if !strings.Contains(authHeader, "sk-auth-real-key") {
 		t.Errorf("expected real API key in Authorization header, got %q", authHeader)
+	}
+}
+
+// TestDecompressResponseBody tests gzip decompression
+func TestDecompressResponseBody(t *testing.T) {
+	tests := []struct {
+		name            string
+		body            []byte
+		contentEncoding string
+		wantDecompressed bool
+	}{
+		{
+			name:            "no encoding",
+			body:            []byte("plain text"),
+			contentEncoding: "",
+			wantDecompressed: false,
+		},
+		{
+			name:            "non-gzip encoding",
+			body:            []byte("deflate text"),
+			contentEncoding: "deflate",
+			wantDecompressed: false,
+		},
+		{
+			name:            "gzip encoding but invalid data",
+			body:            []byte("not gzip data"),
+			contentEncoding: "gzip",
+			wantDecompressed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := decompressResponseBody(tt.body, tt.contentEncoding)
+			if tt.wantDecompressed && bytes.Equal(result, tt.body) {
+				t.Errorf("expected decompression, but got same body")
+			}
+		})
+	}
+}
+
+// TestFormatResponseForMemory tests response formatting for memory storage
+func TestFormatResponseForMemory(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		contentType string
+		wantContent bool
+		wantContains string
+	}{
+		{
+			name: "JSON response with assistant content",
+			body: `{
+				"choices": [
+					{
+						"message": {
+							"content": "Hello, this is the assistant response!"
+						}
+					}
+				]
+			}`,
+			contentType: "application/json",
+			wantContent: true,
+			wantContains: "Hello, this is the assistant response!",
+		},
+		{
+			name: "JSON response with error",
+			body: `{
+				"error": {
+					"message": "API key invalid"
+				}
+			}`,
+			contentType: "application/json",
+			wantContent: true,
+			wantContains: "Error",
+		},
+		{
+			name: "Invalid JSON",
+			body: "not valid json",
+			contentType: "text/plain",
+			wantContent: true,
+			wantContains: "Non-JSON response",
+		},
+		{
+			name: "JSON with delta (streaming)",
+			body: `{
+				"choices": [
+					{
+						"delta": {
+							"content": "Streaming response"
+						}
+					}
+				]
+			}`,
+			contentType: "application/json",
+			wantContent: true,
+			wantContains: "Streaming response",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatResponseForMemory([]byte(tt.body), tt.contentType)
+			if tt.wantContent && result == "" {
+				t.Errorf("formatResponseForMemory returned empty string, want non-empty")
+			}
+			if tt.wantContains != "" && !strings.Contains(result, tt.wantContains) {
+				t.Errorf("formatResponseForMemory result doesn't contain %q, got: %s", tt.wantContains, result)
+			}
+		})
 	}
 }

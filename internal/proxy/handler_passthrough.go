@@ -198,7 +198,7 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 	}
 
 	if model != "" {
-		responseForMemory := string(responseData)
+		responseForMemory := formatResponseForMemory(responseData, "")
 		if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
 			if len(requestBody) > 0 {
 				if err := memWriter.Append(tokenHash, "request", model, string(requestBody)); err != nil {
