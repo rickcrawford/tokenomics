@@ -5,6 +5,9 @@ server:
     enabled: true
     cert_dir: "./certs"
 
+admin:
+  enabled: true
+
 # CLI to provider mappings - auto-detects provider when running commands
 # Example: `tokenomics run claude ...` automatically uses anthropic provider
 cli_maps:

@@ -66,6 +66,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		cfg.Storage.DBPath = filepath.Join(cfg.Dir, "tokenomics.db")
 	}
 
+	// Avoid BoltDB lock contention by reusing an already running local proxy.
+	if existingURL, ok := detectRunningLocalProxy(cfg); ok {
+		return fmt.Errorf("proxy already running at %s. Use 'tokenomics stop' to stop it or 'tokenomics run' to reuse the existing session", existingURL)
+	}
+
 	// Ensure the main directory exists
 	if err := config.EnsureDir(cfg.Dir); err != nil {
 		return fmt.Errorf("ensure directory: %w", err)
@@ -229,6 +234,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	})
 	r.Get("/stats", handler.Stats().StatsHandler)
+	registerAdminRoutes(r, cfg, tokenStore, handler.Stats(), cfg.Dir)
 
 	// Webhook receiver for push-based token sync
 	if cfg.Remote.Webhook.Enabled {
@@ -354,6 +360,37 @@ func runServe(cmd *cobra.Command, args []string) error {
 	log.Println("All servers stopped, releasing resources...")
 
 	return nil
+}
+
+func detectRunningLocalProxy(cfg *config.Config) (string, bool) {
+	if cfg.Server.HTTPPort > 0 {
+		baseURL := fmt.Sprintf("http://localhost:%d", cfg.Server.HTTPPort)
+		if proxyPingHealthy(baseURL+"/ping", false) {
+			return baseURL, true
+		}
+	}
+	if cfg.Server.TLS.Enabled && cfg.Server.HTTPSPort > 0 {
+		baseURL := fmt.Sprintf("https://localhost:%d", cfg.Server.HTTPSPort)
+		if proxyPingHealthy(baseURL+"/ping", true) {
+			return baseURL, true
+		}
+	}
+	return "", false
+}
+
+func proxyPingHealthy(healthURL string, insecure bool) bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	if insecure {
+		client.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+	resp, err := client.Get(healthURL)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // buildRemoteClient creates a remote sync client from config.

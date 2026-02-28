@@ -9,77 +9,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-// defaultProviders contains built-in configurations for common AI providers.
-// External providers.yaml and inline config.yaml entries override these defaults.
-var defaultProviders = map[string]ProviderConfig{
-	"openai": {
-		UpstreamURL: "https://api.openai.com",
-		APIKeyEnv:   "OPENAI_API_KEY",
-	},
-	"generic": {
-		UpstreamURL: "https://api.openai.com",
-		APIKeyEnv:   "OPENAI_API_KEY",
-	},
-	"anthropic": {
-		UpstreamURL: "https://api.anthropic.com",
-		APIKeyEnv:   "ANTHROPIC_API_KEY",
-		AuthScheme:  "header",
-		AuthHeader:  "x-api-key",
-		Headers: map[string]string{
-			"anthropic-version": "2023-06-01",
-		},
-		ChatPath: "/v1/messages",
-	},
-	"azure": {
-		UpstreamURL: "https://my-resource.openai.azure.com",
-		APIKeyEnv:   "AZURE_OPENAI_API_KEY",
-		AuthScheme:  "header",
-		AuthHeader:  "api-key",
-		Headers: map[string]string{
-			"api-version": "2024-10-21",
-		},
-	},
-	"gemini": {
-		UpstreamURL: "https://generativelanguage.googleapis.com",
-		APIKeyEnv:   "GEMINI_API_KEY",
-		AuthScheme:  "query",
-	},
-	"groq": {
-		UpstreamURL: "https://api.groq.com/openai",
-		APIKeyEnv:   "GROQ_API_KEY",
-	},
-	"mistral": {
-		UpstreamURL: "https://api.mistral.ai",
-		APIKeyEnv:   "MISTRAL_API_KEY",
-	},
-	"deepseek": {
-		UpstreamURL: "https://api.deepseek.com",
-		APIKeyEnv:   "DEEPSEEK_API_KEY",
-	},
-	"ollama": {
-		UpstreamURL: "http://localhost:11434",
-		AuthScheme:  "header",
-		ChatPath:    "/api/chat",
-	},
-}
-
-// copyDefaultProviders returns a copy of the built-in provider defaults.
-func copyDefaultProviders() map[string]ProviderConfig {
-	out := make(map[string]ProviderConfig, len(defaultProviders))
-	for k, v := range defaultProviders {
-		out[k] = v
-	}
-	return out
-}
-
-// DefaultProviders returns a copy of the built-in provider defaults.
-func DefaultProviders() map[string]ProviderConfig {
-	return copyDefaultProviders()
-}
-
 type Config struct {
 	Dir              string                    `mapstructure:"dir"`              // base .tokenomics directory (default ".tokenomics")
 	Server           ServerConfig              `mapstructure:"server"`
+	Admin            AdminConfig               `mapstructure:"admin"`
 	Storage          StorageConfig             `mapstructure:"storage"`
 	Session          SessionConfig             `mapstructure:"session"`
 	Security         SecurityConfig            `mapstructure:"security"`
@@ -90,6 +23,18 @@ type Config struct {
 	Ledger           LedgerConfig              `mapstructure:"ledger"`
 	CLIMaps          map[string]string         `mapstructure:"cli_maps"`           // Map CLI names to providers (e.g. "claude" -> "anthropic")
 	DefaultProvider  string                    `mapstructure:"default_provider"`  // Default provider when not specified in policy
+}
+
+// AdminConfig controls the embedded local admin UI and API.
+type AdminConfig struct {
+	Enabled bool            `mapstructure:"enabled"` // Enable embedded admin UI/API (default true)
+	Auth    AdminAuthConfig `mapstructure:"auth"`
+}
+
+// AdminAuthConfig configures optional basic auth for admin routes.
+type AdminAuthConfig struct {
+	Username string `mapstructure:"username"` // Empty means auth disabled
+	Password string `mapstructure:"password"` // Empty means auth disabled
 }
 
 // LoggingConfig controls request and event logging behavior.
@@ -225,6 +170,9 @@ func Load(cfgFile string) (*Config, error) {
 	v.SetDefault("server.tls.auto_gen", true)
 	v.SetDefault("server.tls.cert_dir", "")  // empty = derive from dir at use time
 	v.SetDefault("server.upstream_url", "https://api.openai.com")
+	v.SetDefault("admin.enabled", true)
+	v.SetDefault("admin.auth.username", "")
+	v.SetDefault("admin.auth.password", "")
 	v.SetDefault("storage.db_path", "")                     // empty = derive from dir at use time
 	v.SetDefault("session.backend", "memory")
 	v.SetDefault("session.redis.addr", "localhost:6379")
@@ -395,6 +343,9 @@ func EnsureDir(dir string) error {
 		// This is safe because Load() only calls EnsureDir after successful config load
 		defaultConfig := `# Tokenomics configuration
 # Full reference: https://github.com/rickcrawford/tokenomics/docs/CONFIGURATION.md
+
+admin:
+  enabled: true
 
 logging:
   level: info

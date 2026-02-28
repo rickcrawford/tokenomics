@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tokenomics Admin</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">Tokenomics Admin</div>
+      <nav>
+        <button class="nav-btn active" data-tab="analytics">📈 Analytics</button>
+        <button class="nav-btn" data-tab="keys">🔑 Keys</button>
+        <button class="nav-btn" data-tab="sessions">🧾 Sessions</button>
+        <button class="nav-btn" data-tab="memory">🧠 Memory</button>
+        <button class="nav-btn" data-tab="docs">📚 Docs</button>
+      </nav>
+      <div id="healthBadge" class="badge">Connecting...</div>
+    </aside>
+
+    <main class="content">
+      <section class="panel tab active" id="tab-analytics">
+        <h2>Analytics Dashboard</h2>
+        <div class="grid metrics">
+          <div class="metric"><span>Requests</span><strong id="mRequests">-</strong></div>
+          <div class="metric"><span>Input Tokens</span><strong id="mInput">-</strong></div>
+          <div class="metric"><span>Output Tokens</span><strong id="mOutput">-</strong></div>
+          <div class="metric"><span>Total Tokens</span><strong id="mTotal">-</strong></div>
+          <div class="metric"><span>Errors</span><strong id="mErrors">-</strong></div>
+          <div class="metric"><span>Sessions</span><strong id="mSessions">-</strong></div>
+        </div>
+      </section>
+
+      <section class="panel tab" id="tab-keys">
+        <div class="row-between">
+          <h2>Keys and Policies</h2>
+          <div class="row-actions">
+            <button id="newKeyBtn">New Key</button>
+            <button id="refreshKeys">Refresh</button>
+          </div>
+        </div>
+        <table id="keysTable">
+          <thead>
+            <tr>
+              <th>Token Hash</th>
+              <th>Created</th>
+              <th>Expires</th>
+              <th>Default Provider</th>
+              <th>Max Tokens</th>
+              <th>Providers</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+      <section class="panel tab" id="tab-sessions">
+        <h2>Sessions</h2>
+        <div id="sessionSummary" class="summary"></div>
+        <table id="sessionsTable">
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>Started</th>
+              <th>Requests</th>
+              <th>Total Tokens</th>
+              <th>Branch</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="panel tab" id="tab-memory">
+        <h2>Memory Files</h2>
+        <div class="memory-layout">
+          <ul id="memoryList" class="memory-list"></ul>
+          <pre id="memoryContent" class="memory-content">Select a memory file.</pre>
+        </div>
+      </section>
+
+      <section class="panel tab" id="tab-docs">
+        <h2>Embedded Docs</h2>
+        <p class="hint">These instructions are embedded into the binary and based on project docs.</p>
+        <div class="docs-layout">
+          <ul id="docsList" class="memory-list"></ul>
+          <article class="docs-article">
+            <h3 id="docsTitle">Select a document</h3>
+            <div id="docsBody"></div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="policyEditorModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content modal-wide">
+      <div class="row-between">
+        <h3>Policy editor</h3>
+        <button id="closePolicyEditorBtn" type="button">Close</button>
+      </div>
+      <div class="key-editor">
+        <h4 id="keyEditorTitle">Create key</h4>
+        <div class="key-grid">
+          <label>
+            Expires
+            <input id="keyExpires" type="datetime-local" />
+          </label>
+          <label>
+            API key env var
+            <input id="keyBaseEnv" type="text" list="envVarOptions" placeholder="OPENAI_API_KEY" />
+          </label>
+          <label>
+            Default provider
+            <input id="keyDefaultProvider" type="text" placeholder="openai" />
+          </label>
+          <label>
+            Max tokens
+            <input id="keyMaxTokens" type="number" min="0" placeholder="1000000" />
+          </label>
+          <label>
+            Upstream URL
+            <input id="keyUpstreamUrl" type="text" placeholder="https://api.openai.com/v1" />
+          </label>
+          <label>
+            Model
+            <input id="keyModel" type="text" placeholder="gpt-4o" />
+            <span class="hint">Exact model match.</span>
+          </label>
+          <label>
+            Model regex
+            <input id="keyModelRegex" type="text" placeholder="^gpt-4.*" />
+            <span class="hint">Pattern match for model names.</span>
+            <button id="testModelRegexBtn" type="button">Test regex</button>
+          </label>
+          <label>
+            Timeout (seconds)
+            <input id="keyTimeout" type="number" min="0" placeholder="60" />
+          </label>
+        </div>
+
+        <h4>Prompts</h4>
+        <div id="promptRows" class="rows"></div>
+        <button id="addPromptBtn">Add prompt</button>
+
+        <h4>Rules</h4>
+        <div id="ruleRows" class="rows"></div>
+        <button id="addRuleBtn">Add rule</button>
+
+        <h4>Rate limit</h4>
+        <div class="key-grid">
+          <label>
+            Max parallel
+            <input id="rateMaxParallel" type="number" min="0" placeholder="4" />
+          </label>
+        </div>
+        <div id="rateRuleRows" class="rows"></div>
+        <button id="addRateRuleBtn">Add rate rule</button>
+
+        <h4>Retry and fallback</h4>
+        <div class="key-grid">
+          <label>
+            Max retries
+            <input id="retryMaxRetries" type="number" min="0" placeholder="2" />
+          </label>
+          <label>
+            Retry on (csv)
+            <input id="retryRetryOn" type="text" placeholder="429,500,502,503" />
+          </label>
+          <label>
+            Fallbacks (csv)
+            <input id="retryFallbacks" type="text" placeholder="gpt-4o-mini,gpt-4.1-mini" />
+          </label>
+        </div>
+
+        <h4>Metadata</h4>
+        <div id="metadataRows" class="rows"></div>
+        <button id="addMetadataBtn">Add metadata</button>
+
+        <h4>Provider policies</h4>
+        <p class="hint">Use one row per provider policy object. This supports full provider-level features including prompts and rules.</p>
+        <div id="providerRows" class="rows"></div>
+        <button id="addProviderBtn">Add provider policy</button>
+
+        <label class="editor-block">
+          Advanced policy JSON
+          <textarea id="keyPolicyJson" rows="14"></textarea>
+        </label>
+        <div class="row-actions">
+          <button id="syncJsonToFormBtn">Load JSON Into Form</button>
+          <button id="syncFormToJsonBtn">Generate JSON From Form</button>
+        </div>
+        <datalist id="envVarOptions"></datalist>
+        <div class="row-actions">
+          <button id="saveKeyBtn">Save</button>
+          <button id="deleteKeyBtn">Delete</button>
+          <button id="clearKeyBtn">Clear</button>
+        </div>
+        <pre id="keyEditorStatus" class="editor-status">Ready.</pre>
+      </div>
+    </div>
+  </div>
+
+  <div id="keyModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3>New key created</h3>
+      <p class="hint">Copy and store this key now. It is only shown once.</p>
+      <pre id="keyModalValue" class="editor-status"></pre>
+      <div class="row-actions">
+        <button id="copyKeyModalBtn">Copy key</button>
+        <button id="closeKeyModalBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>

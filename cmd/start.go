@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -23,6 +24,7 @@ var (
 	startHost    string
 	startPort    int
 	startTLS     bool
+	startInsecure bool
 	startPidFile string
 	startLogFile string
 )
@@ -31,6 +33,7 @@ func init() {
 	startCmd.Flags().StringVar(&startHost, "host", "localhost", "proxy hostname")
 	startCmd.Flags().IntVar(&startPort, "port", 8443, "proxy port")
 	startCmd.Flags().BoolVar(&startTLS, "tls", true, "use HTTPS")
+	startCmd.Flags().BoolVar(&startInsecure, "insecure", false, "skip TLS verification for startup health checks")
 	startCmd.Flags().StringVar(&startPidFile, "pid-file", "", "PID file path (default: ~/.tokenomics/tokenomics.pid)")
 	startCmd.Flags().StringVar(&startLogFile, "log-file", "", "log file path (default: ~/.tokenomics/tokenomics.log)")
 
@@ -44,18 +47,29 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 	proxyURL := fmt.Sprintf("%s://%s:%d", scheme, startHost, startPort)
 
-	dcfg := daemonConfig{
-		host:    startHost,
-		port:    startPort,
-		tls:     startTLS,
-		pidFile: startPidFile,
-		logFile: startLogFile,
-	}
+	dcfg := buildStartDaemonConfig()
 
-	if err := startDaemon(proxyURL, dcfg); err != nil {
+	alreadyRunning, err := startDaemon(proxyURL, dcfg)
+	if err != nil {
 		return err
 	}
 
+	if alreadyRunning {
+		fmt.Fprintf(os.Stderr, "Proxy already running: %s. Use 'tokenomics stop' to stop it.\n", proxyURL)
+	} else {
+		fmt.Fprintf(os.Stderr, "Proxy started: %s\n", proxyURL)
+	}
 	fmt.Println(proxyURL)
 	return nil
+}
+
+func buildStartDaemonConfig() daemonConfig {
+	return daemonConfig{
+		host:    startHost,
+		port:    startPort,
+		tls:     startTLS,
+		insecure: startInsecure,
+		pidFile: startPidFile,
+		logFile: startLogFile,
+	}
 }

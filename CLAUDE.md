@@ -60,6 +60,14 @@ Update docs when adding features. Keep docs concise and scannable. Reference fil
 - `docs/TOKEN_MANAGEMENT.md` for CLI token commands
 - `docs/AGENT_INTEGRATION.md` for init command usage
 - `README.md` features table for new capabilities
+- `docs/WEB.md` for embedded admin routes and UX
+- `docs/ADMIN_UI.md` for admin tabs, policy editor UX, and embedded docs workflow
+
+Documentation update rule:
+- For every new feature or behavior change, update the relevant docs in the same change.
+- If admin UX or in-app instructions change, update embedded docs content in `cmd/web/admin/assets/docs.json` in the same change.
+- If policy behavior changes, update `docs/POLICIES.md`.
+- If configuration or CLI behavior changes, update `docs/CONFIGURATION.md` and `README.md` where applicable.
 
 ## Writing Style
 

@@ -1,21 +1,4 @@
-# Tokenomics Provider Configuration
-#
-# Defines known upstream AI providers. Policies reference these by name
-# in their "providers" map, inheriting connection details automatically.
-#
-# Each provider specifies:
-#   upstream_url  - Base URL for the provider's API
-#   api_key_env   - Environment variable holding the API key
-#   base_url_env  - Environment variable for client base URL (used by init/run)
-#   auth_scheme   - How to send the key: "bearer" (default), "header", "query"
-#   auth_header   - Custom header name (default: "Authorization")
-#   headers       - Extra headers sent with every request
-#   models        - Known model prefixes (informational, for documentation)
-#   chat_path     - Override path for chat completions endpoint
-
 providers:
-
-  # ── OpenAI ─────────────────────────────────────────────────────────────
   openai:
     upstream_url: https://api.openai.com
     api_key_env: OPENAI_API_KEY
@@ -33,7 +16,6 @@ providers:
       - o3-mini
       - o4-mini
 
-  # ── Anthropic ──────────────────────────────────────────────────────────
   anthropic:
     upstream_url: https://api.anthropic.com
     api_key_env: ANTHROPIC_API_KEY
@@ -53,9 +35,6 @@ providers:
       - claude-3-sonnet
       - claude-3-haiku
 
-  # ── Azure OpenAI ───────────────────────────────────────────────────────
-  # NOTE: Replace {resource} and {deployment} with your Azure values.
-  # upstream_url format: https://{resource}.openai.azure.com/openai/deployments/{deployment}
   azure_openai:
     upstream_url: https://{resource}.openai.azure.com
     api_key_env: AZURE_OPENAI_API_KEY
@@ -72,7 +51,6 @@ providers:
       - o1
       - o1-mini
 
-  # ── Google Gemini (AI Studio) ──────────────────────────────────────────
   google_gemini:
     upstream_url: https://generativelanguage.googleapis.com
     api_key_env: GOOGLE_API_KEY
@@ -87,9 +65,6 @@ providers:
       - gemini-1.5-pro
       - gemini-1.5-flash
 
-  # ── Google Vertex AI ───────────────────────────────────────────────────
-  # NOTE: Replace {project} and {location} with your GCP values.
-  # Uses OAuth2 bearer token from gcloud auth.
   vertex_ai:
     upstream_url: https://{location}-aiplatform.googleapis.com
     api_key_env: VERTEX_AI_TOKEN
@@ -100,7 +75,6 @@ providers:
       - gemini-2.5-flash
       - gemini-2.0-flash
 
-  # ── Mistral AI ─────────────────────────────────────────────────────────
   mistral:
     upstream_url: https://api.mistral.ai
     api_key_env: MISTRAL_API_KEY
@@ -114,7 +88,6 @@ providers:
       - codestral-latest
       - pixtral-large-latest
 
-  # ── Cohere ─────────────────────────────────────────────────────────────
   cohere:
     upstream_url: https://api.cohere.com
     api_key_env: COHERE_API_KEY
@@ -126,7 +99,6 @@ providers:
       - command-light
       - command-nightly
 
-  # ── Groq ───────────────────────────────────────────────────────────────
   groq:
     upstream_url: https://api.groq.com/openai
     api_key_env: GROQ_API_KEY
@@ -138,7 +110,6 @@ providers:
       - mixtral-8x7b-32768
       - gemma2-9b-it
 
-  # ── Together AI ────────────────────────────────────────────────────────
   together:
     upstream_url: https://api.together.xyz
     api_key_env: TOGETHER_API_KEY
@@ -150,7 +121,6 @@ providers:
       - mistralai/Mixtral-8x22B-Instruct-v0.1
       - Qwen/Qwen2.5-72B-Instruct-Turbo
 
-  # ── Fireworks AI ───────────────────────────────────────────────────────
   fireworks:
     upstream_url: https://api.fireworks.ai/inference
     api_key_env: FIREWORKS_API_KEY
@@ -161,7 +131,6 @@ providers:
       - accounts/fireworks/models/mixtral-8x22b-instruct
       - accounts/fireworks/models/qwen2p5-72b-instruct
 
-  # ── Perplexity ─────────────────────────────────────────────────────────
   perplexity:
     upstream_url: https://api.perplexity.ai
     api_key_env: PERPLEXITY_API_KEY
@@ -172,7 +141,6 @@ providers:
       - sonar-reasoning-pro
       - sonar-reasoning
 
-  # ── DeepSeek ───────────────────────────────────────────────────────────
   deepseek:
     upstream_url: https://api.deepseek.com
     api_key_env: DEEPSEEK_API_KEY
@@ -181,7 +149,6 @@ providers:
       - deepseek-chat
       - deepseek-reasoner
 
-  # ── xAI (Grok) ────────────────────────────────────────────────────────
   xai:
     upstream_url: https://api.x.ai
     api_key_env: XAI_API_KEY
@@ -192,9 +159,6 @@ providers:
       - grok-3
       - grok-3-mini
 
-  # ── OpenRouter ─────────────────────────────────────────────────────────
-  # Routes to multiple providers behind a single API. Models use
-  # provider/model format (e.g., "openai/gpt-4o", "anthropic/claude-3-opus").
   openrouter:
     upstream_url: https://openrouter.ai/api
     api_key_env: OPENROUTER_API_KEY
@@ -205,8 +169,6 @@ providers:
       - meta-llama/llama-3.1-405b-instruct
       - google/gemini-pro-1.5
 
-  # ── Ollama (local) ─────────────────────────────────────────────────────
-  # No API key needed for local inference.
   ollama:
     upstream_url: http://localhost:11434
     api_key_env: ""
@@ -223,23 +185,18 @@ providers:
       - gemma2
       - qwen2.5
 
-  # ── vLLM (self-hosted) ─────────────────────────────────────────────────
-  # OpenAI-compatible API served by vLLM.
   vllm:
     upstream_url: http://localhost:8000
     api_key_env: VLLM_API_KEY
     base_url_env: VLLM_BASE_URL
     models: []
 
-  # ── LiteLLM Proxy ──────────────────────────────────────────────────────
-  # If running LiteLLM as a unified gateway.
   litellm:
     upstream_url: http://localhost:4000
     api_key_env: LITELLM_API_KEY
     base_url_env: LITELLM_BASE_URL
     models: []
 
-  # ── AWS Bedrock (OpenAI-compatible gateways commonly front this) ─────────
   bedrock:
     upstream_url: https://bedrock-runtime.{region}.amazonaws.com
     api_key_env: AWS_BEARER_TOKEN_BEDROCK
@@ -250,7 +207,6 @@ providers:
       - amazon.nova-pro-v1:0
       - meta.llama3-1-70b-instruct-v1:0
 
-  # ── Replicate ─────────────────────────────────────────────────────────────
   replicate:
     upstream_url: https://api.replicate.com
     api_key_env: REPLICATE_API_TOKEN
@@ -259,7 +215,6 @@ providers:
       - meta/meta-llama-3-70b-instruct
       - mistralai/mistral-7b-instruct-v0.2
 
-  # ── NVIDIA NIM ────────────────────────────────────────────────────────────
   nvidia_nim:
     upstream_url: https://integrate.api.nvidia.com
     api_key_env: NVIDIA_API_KEY
@@ -268,7 +223,6 @@ providers:
       - meta/llama-3.1-70b-instruct
       - nvidia/llama-3.1-nemotron-70b-instruct
 
-  # ── SambaNova ─────────────────────────────────────────────────────────────
   sambanova:
     upstream_url: https://api.sambanova.ai/v1
     api_key_env: SAMBANOVA_API_KEY
@@ -277,7 +231,6 @@ providers:
       - Meta-Llama-3.1-70B-Instruct
       - Qwen2.5-72B-Instruct
 
-  # ── Cerebras ──────────────────────────────────────────────────────────────
   cerebras:
     upstream_url: https://api.cerebras.ai/v1
     api_key_env: CEREBRAS_API_KEY
@@ -286,7 +239,6 @@ providers:
       - llama-3.3-70b
       - qwen-2.5-72b
 
-  # ── AI21 ──────────────────────────────────────────────────────────────────
   ai21:
     upstream_url: https://api.ai21.com/studio/v1
     api_key_env: AI21_API_KEY
@@ -295,7 +247,6 @@ providers:
       - jamba-1.5-large
       - jamba-1.5-mini
 
-  # ── Moonshot (Kimi) ───────────────────────────────────────────────────────
   moonshot:
     upstream_url: https://api.moonshot.ai/v1
     api_key_env: MOONSHOT_API_KEY
@@ -304,7 +255,6 @@ providers:
       - moonshot-v1-8k
       - moonshot-v1-128k
 
-  # ── Anyscale Endpoints ────────────────────────────────────────────────────
   anyscale:
     upstream_url: https://api.endpoints.anyscale.com/v1
     api_key_env: ANYSCALE_API_KEY
@@ -313,14 +263,12 @@ providers:
       - meta-llama/Llama-3.1-70B-Instruct
       - mistralai/Mixtral-8x7B-Instruct-v0.1
 
-  # ── LocalAI ───────────────────────────────────────────────────────────────
   localai:
     upstream_url: http://localhost:8081
     api_key_env: LOCALAI_API_KEY
     base_url_env: LOCALAI_BASE_URL
     models: []
 
-  # ── LM Studio Local Server ────────────────────────────────────────────────
   lmstudio:
     upstream_url: http://localhost:1234
     api_key_env: LMSTUDIO_API_KEY

@@ -44,7 +44,13 @@ func runStop(cmd *cobra.Command, args []string) error {
 	pid, err := readPIDFile(pidFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "Proxy not running (no PID file at %s)\n", pidFile)
+			if stopped, stopErr := stopByProcessScan(pidFile); stopErr != nil {
+				return stopErr
+			} else if stopped {
+				fmt.Fprintf(os.Stderr, "Proxy stopped (recovered from stale or missing PID file)\n")
+			} else {
+				fmt.Fprintf(os.Stderr, "Proxy not running (no PID file at %s)\n", pidFile)
+			}
 			return nil
 		}
 		return fmt.Errorf("read PID file: %w", err)
@@ -60,10 +66,17 @@ func runStop(cmd *cobra.Command, args []string) error {
 	}
 
 	// Request graceful shutdown
+	_ = terminateProcessGroup(pid)
 	if err := terminateProcess(p); err != nil {
-		// Process might already be dead
-		os.Remove(pidFile)
-		fmt.Fprintf(os.Stderr, "Proxy not running (signal failed)\n")
+		// Process might already be dead or PID may be stale.
+		if stopped, stopErr := stopByProcessScan(pidFile); stopErr != nil {
+			return stopErr
+		} else if stopped {
+			fmt.Fprintf(os.Stderr, "Proxy stopped (recovered from stale PID %d)\n", pid)
+		} else {
+			os.Remove(pidFile)
+			fmt.Fprintf(os.Stderr, "Proxy not running (signal failed)\n")
+		}
 		return nil
 	}
 
@@ -81,6 +94,7 @@ func runStop(cmd *cobra.Command, args []string) error {
 	}
 
 	// Force kill if still alive
+	_ = killProcessGroup(pid)
 	if err := killProcess(p); err == nil {
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -89,4 +103,45 @@ func runStop(cmd *cobra.Command, args []string) error {
 	os.Remove(pidFile)
 	fmt.Fprintf(os.Stderr, "Proxy killed (PID %d)\n", pid)
 	return nil
+}
+
+func stopByProcessScan(pidFile string) (bool, error) {
+	pids, err := findServePIDs()
+	if err != nil {
+		return false, fmt.Errorf("scan for running proxy process: %w", err)
+	}
+	if len(pids) == 0 {
+		return false, nil
+	}
+	stoppedAny := false
+	for _, pid := range pids {
+		p, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		if err := terminateProcess(p); err != nil {
+			continue
+		}
+		_ = terminateProcessGroup(pid)
+		for i := 0; i < 120; i++ {
+			if !processAlive(pid) {
+				stoppedAny = true
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if processAlive(pid) {
+			_ = killProcessGroup(pid)
+			if err := killProcess(p); err == nil {
+				time.Sleep(100 * time.Millisecond)
+			}
+			if !processAlive(pid) {
+				stoppedAny = true
+			}
+		}
+	}
+	if stoppedAny {
+		_ = os.Remove(pidFile)
+	}
+	return stoppedAny, nil
 }

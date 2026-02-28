@@ -60,6 +60,12 @@ server:
     cert_file: ""          # Path to a custom TLS certificate (disables auto_gen)
     key_file: ""           # Path to a custom TLS private key (disables auto_gen)
 
+admin:
+  enabled: true            # Enable embedded admin web UI/API
+  auth:
+    username: ""           # Optional basic auth username
+    password: ""           # Optional basic auth password
+
 storage:
   db_path: "./tokenomics.db"  # BoltDB file for token storage
 
@@ -138,6 +144,9 @@ ledger:
 | `server.tls.cert_dir` | `{dir}/certs` | Directory where auto-generated certs are stored. Defaults to `~/.tokenomics/certs`. |
 | `server.tls.cert_file` | (empty) | Path to a custom server certificate. When set, `auto_gen` is bypassed. |
 | `server.tls.key_file` | (empty) | Path to a custom server private key. When set, `auto_gen` is bypassed. |
+| `admin.enabled` | `true` | Enables the embedded admin UI and API on the same listeners (analytics, keys, sessions, memory). |
+| `admin.auth.username` | (empty) | Optional basic auth username for admin routes. |
+| `admin.auth.password` | (empty) | Optional basic auth password for admin routes. |
 | `storage.db_path` | `{dir}/tokenomics.db` | Path to the BoltDB database file. Defaults to `~/.tokenomics/tokenomics.db`. |
 | `session.backend` | `memory` | Session tracking backend. Use `"redis"` for persistence across restarts. |
 | `session.redis.addr` | `localhost:6379` | Redis server address. |
@@ -236,6 +245,9 @@ Every config field can be overridden with a `TOKENOMICS_` prefixed environment v
 | `server.tls.cert_dir` | `TOKENOMICS_SERVER_TLS_CERT_DIR` |
 | `server.tls.cert_file` | `TOKENOMICS_SERVER_TLS_CERT_FILE` |
 | `server.tls.key_file` | `TOKENOMICS_SERVER_TLS_KEY_FILE` |
+| `admin.enabled` | `TOKENOMICS_ADMIN_ENABLED` |
+| `admin.auth.username` | `TOKENOMICS_ADMIN_AUTH_USERNAME` |
+| `admin.auth.password` | `TOKENOMICS_ADMIN_AUTH_PASSWORD` |
 | `storage.db_path` | `TOKENOMICS_STORAGE_DB_PATH` |
 | `session.backend` | `TOKENOMICS_SESSION_BACKEND` |
 | `session.redis.addr` | `TOKENOMICS_SESSION_REDIS_ADDR` |
@@ -272,6 +284,14 @@ These are not config fields but are read directly at runtime:
 |---|---|
 | `TOKENOMICS_HASH_KEY` | The HMAC secret key used to hash wrapper tokens. Required for `token create` and `serve`. |
 | Whatever `base_key_env` points to (e.g. `OPENAI_PAT`) | The real upstream API key. Resolved per-policy at request time. |
+
+## Provider Defaults
+
+Tokenomics ships with embedded provider defaults for common upstreams and model lists.
+
+- Embedded defaults live in `internal/config/providers.embedded.yaml`.
+- Repository source file is `providers.yaml`.
+- A sync test enforces that these two files remain aligned.
 
 ## CLI Flags
 
@@ -349,6 +369,20 @@ These commands take no additional flags beyond the global `--config` and `--db` 
 ### `init` / `run` Commands
 
 See [Agent Integration](AGENT_INTEGRATION.md) for full details on `init` and `run` flags.
+
+`run` admin behavior:
+
+- `run` starts an ephemeral proxy with admin disabled by default.
+- Admin is enabled for this ephemeral proxy only when both conditions are true:
+  - `--admin` is passed to `tokenomics run`.
+  - `admin.enabled` is `true` in config.
+- This gating only applies to run-managed ephemeral proxy startup.
+
+### Admin UI Documentation
+
+For admin UI tab behavior, key editor workflow, and embedded docs maintenance, see:
+
+- `docs/ADMIN_UI.md`
 
 ### `completion` Command
 

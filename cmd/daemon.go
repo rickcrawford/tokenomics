@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net/http"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"os/user"
 	"path/filepath"
 	"time"
+
+	"github.com/rickcrawford/tokenomics/internal/config"
 )
 
 // daemonConfig holds settings for starting the proxy as a background process.
@@ -21,72 +24,222 @@ type daemonConfig struct {
 	logFile  string
 }
 
+var (
+	daemonRetryAttempts  = 3
+	daemonReadinessPolls = 120
+	daemonReadinessSleep = 100 * time.Millisecond
+	daemonRetrySleep     = 500 * time.Millisecond
+	daemonHealthTimeout  = 250 * time.Millisecond
+	daemonCommandFactory = func(exePath string, args ...string) *exec.Cmd { return exec.Command(exePath, args...) }
+	daemonStopProcess    = stopSpawnedDaemon
+	daemonFindServePIDs  = findServePIDs
+)
+
 // startDaemon launches the proxy as a background process and waits for it to
-// become ready. It is used by both the init and start commands.
-func startDaemon(baseURL string, dc daemonConfig) error {
+// become ready. It returns true when a healthy daemon is already running.
+func startDaemon(baseURL string, dc daemonConfig) (bool, error) {
 	pidFile, logFile := resolveDaemonPaths(dc.pidFile, dc.logFile)
-
-	// Ensure tokenomics directory exists
-	pidDir := filepath.Dir(pidFile)
-	if err := os.MkdirAll(pidDir, 0o700); err != nil {
-		return fmt.Errorf("create tokenomics dir: %w", err)
-	}
-
-	// Check if already running
-	if existingPid, err := readPIDFile(pidFile); err == nil {
-		if processAlive(existingPid) {
-			return nil
-		}
-	}
-
-	// Open log file for proxy output
-	logFd, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return fmt.Errorf("open log file: %w", err)
-	}
-	defer logFd.Close()
-
-	// Launch tokenomics serve as a detached process
-	serveCmd := exec.Command(os.Args[0], "serve", "--config", cfgFile, "--db", dbPath)
-	serveCmd.Stdout = logFd
-	serveCmd.Stderr = logFd
-	detachProcess(serveCmd)
-
-	if err := serveCmd.Start(); err != nil {
-		return fmt.Errorf("start proxy: %w", err)
-	}
-
-	if err := writePIDFile(pidFile, serveCmd.Process.Pid); err != nil {
-		return fmt.Errorf("write PID file: %w", err)
-	}
-
-	// Poll health endpoint for readiness
 	scheme := "https"
 	if !dc.tls {
 		scheme = "http"
 	}
 	healthURL := fmt.Sprintf("%s://%s:%d/ping", scheme, dc.host, dc.port)
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	if dc.insecure {
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	// Ensure tokenomics directory exists
+	pidDir := filepath.Dir(pidFile)
+	if err := os.MkdirAll(pidDir, 0o700); err != nil {
+		return false, fmt.Errorf("create tokenomics dir: %w", err)
+	}
+
+	client := daemonHealthClient(dc)
+
+	// If the target endpoint is already healthy, treat it as already running
+	// even if the PID file is stale or missing.
+	if resp, err := client.Get(healthURL); err == nil {
+		resp.Body.Close()
+		if resp.StatusCode == 200 {
+			_ = ensurePIDFileForRunningServe(pidFile)
+			return true, nil
 		}
 	}
 
-	for i := 0; i < 30; i++ {
-		resp, err := client.Get(healthURL)
-		if err == nil && resp.StatusCode == 200 {
-			resp.Body.Close()
-			return nil
+	// Check if already running
+	if existingPid, err := readPIDFile(pidFile); err == nil {
+		if processAlive(existingPid) {
+			return true, nil
 		}
-		if resp != nil {
+	}
+	// Fallback by process scan to avoid spawning a second serve process that
+	// would race on BoltDB locks when PID file is stale/missing.
+	if pids, err := daemonFindServePIDs(); err == nil && len(pids) > 0 {
+		if len(pids) == 1 {
+			_ = writePIDFile(pidFile, pids[0])
+		}
+		return true, nil
+	}
+
+	// Open log file for proxy output
+	logFd, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return false, fmt.Errorf("open log file: %w", err)
+	}
+	defer logFd.Close()
+
+	exePath, err := os.Executable()
+	if err != nil {
+		exePath = os.Args[0]
+	}
+	serveArgs := []string{"serve"}
+	if cfgFile != "" {
+		serveArgs = append(serveArgs, "--config", cfgFile)
+	}
+	if dbPath != "" {
+		serveArgs = append(serveArgs, "--db", dbPath)
+	}
+	if dirOverride != "" {
+		serveArgs = append(serveArgs, "--dir", dirOverride)
+	}
+	serveEnv := os.Environ()
+	if dc.tls {
+		serveEnv = append(
+			serveEnv,
+			"TOKENOMICS_SERVER_TLS_ENABLED=true",
+			fmt.Sprintf("TOKENOMICS_SERVER_HTTPS_PORT=%d", dc.port),
+		)
+	} else {
+		serveEnv = append(
+			serveEnv,
+			"TOKENOMICS_SERVER_TLS_ENABLED=false",
+			fmt.Sprintf("TOKENOMICS_SERVER_HTTP_PORT=%d", dc.port),
+		)
+	}
+
+	// Retry startup to handle transient BoltDB lock contention after stop.
+	for attempt := 0; attempt < daemonRetryAttempts; attempt++ {
+		serveCmd := daemonCommandFactory(exePath, serveArgs...)
+		serveCmd.Env = serveEnv
+		serveCmd.Stdout = logFd
+		serveCmd.Stderr = logFd
+		detachProcess(serveCmd)
+
+		if err := serveCmd.Start(); err != nil {
+			return false, fmt.Errorf("start proxy: %w", err)
+		}
+		if err := writePIDFile(pidFile, serveCmd.Process.Pid); err != nil {
+			return false, fmt.Errorf("write PID file: %w", err)
+		}
+
+		startedPID := serveCmd.Process.Pid
+		ready := false
+		// Poll health endpoint for readiness.
+		for i := 0; i < daemonReadinessPolls; i++ {
+			resp, err := client.Get(healthURL)
+			if err == nil && resp.StatusCode == 200 {
+				resp.Body.Close()
+				ready = true
+				return false, nil
+			}
+			if resp != nil {
+				resp.Body.Close()
+			}
+			// If the process exited before becoming healthy, retry launch.
+			if !processAlive(startedPID) {
+				_ = os.Remove(pidFile)
+				break
+			}
+			time.Sleep(daemonReadinessSleep)
+		}
+
+		// Check one more time in case another process became healthy.
+		if resp, err := client.Get(healthURL); err == nil {
 			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				return false, nil
+			}
+		}
+
+		// Health probe never succeeded for this spawn, clean it up so we do not
+		// leave detached orphan processes on repeated failures.
+		if !ready && processAlive(startedPID) {
+			daemonStopProcess(startedPID)
+			_ = os.Remove(pidFile)
+		}
+
+		if attempt < daemonRetryAttempts-1 {
+			time.Sleep(daemonRetrySleep)
+		}
+	}
+
+	return false, fmt.Errorf("proxy failed to start within 12 seconds")
+}
+
+func stopSpawnedDaemon(pid int) {
+	_ = terminateProcessGroup(pid)
+	p, err := os.FindProcess(pid)
+	if err == nil {
+		_ = terminateProcess(p)
+	}
+	for i := 0; i < 60; i++ {
+		if !processAlive(pid) {
+			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	_ = killProcessGroup(pid)
+	if err == nil {
+		_ = killProcess(p)
+	}
+}
 
-	return fmt.Errorf("proxy failed to start within 3 seconds")
+func daemonHealthClient(dc daemonConfig) *http.Client {
+	client := &http.Client{Timeout: daemonHealthTimeout}
+	if !dc.tls {
+		return client
+	}
+
+	tlsCfg := &tls.Config{}
+	if dc.insecure {
+		tlsCfg.InsecureSkipVerify = true
+		client.Transport = &http.Transport{TLSClientConfig: tlsCfg}
+		return client
+	}
+
+	// Strict by default: trust Tokenomics local CA when available.
+	caPath := ""
+	cfg, err := config.Load(cfgFile)
+	if err == nil && cfg != nil {
+		dir := cfg.Dir
+		if dirOverride != "" {
+			dir = dirOverride
+			if !filepath.IsAbs(dir) {
+				if abs, err := filepath.Abs(dir); err == nil {
+					dir = abs
+				}
+			}
+		}
+		certDir := cfg.Server.TLS.CertDir
+		if certDir == "" || certDir == "./certs" {
+			certDir = filepath.Join(dir, "certs")
+		}
+		caPath = filepath.Join(certDir, "ca.crt")
+	}
+	if caPath == "" {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			caPath = filepath.Join(homeDir, ".tokenomics", "certs", "ca.crt")
+		}
+	}
+
+	if caPath != "" {
+		if pemData, err := os.ReadFile(caPath); err == nil {
+			pool := x509.NewCertPool()
+			if pool.AppendCertsFromPEM(pemData) {
+				tlsCfg.RootCAs = pool
+			}
+		}
+	}
+
+	client.Transport = &http.Transport{TLSClientConfig: tlsCfg}
+	return client
 }
 
 // resolveDaemonPaths returns the PID and log file paths, falling back to
@@ -124,4 +277,18 @@ func readPIDFile(path string) (int, error) {
 
 func writePIDFile(path string, pid int) error {
 	return os.WriteFile(path, []byte(fmt.Sprintf("%d", pid)), 0o644)
+}
+
+func ensurePIDFileForRunningServe(pidFile string) error {
+	if pid, err := readPIDFile(pidFile); err == nil && processAlive(pid) {
+		return nil
+	}
+	pids, err := findServePIDs()
+	if err != nil || len(pids) == 0 {
+		return err
+	}
+	if len(pids) == 1 {
+		return writePIDFile(pidFile, pids[0])
+	}
+	return nil
 }

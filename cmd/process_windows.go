@@ -36,6 +36,12 @@ func killProcess(p *os.Process) error {
 	return p.Kill()
 }
 
+// terminateProcessGroup is unsupported on Windows in this implementation.
+func terminateProcessGroup(pid int) error { return nil }
+
+// killProcessGroup is unsupported on Windows in this implementation.
+func killProcessGroup(pid int) error { return nil }
+
 // interruptProcess on Windows falls back to Kill since os.Interrupt is not
 // reliably supported for arbitrary processes.
 func interruptProcess(p *os.Process) error {
@@ -45,3 +51,9 @@ func interruptProcess(p *os.Process) error {
 // setProcessGroup is a no-op on Windows. Child processes do not share
 // the parent's console signal group by default.
 func setProcessGroup(cmd *exec.Cmd) {}
+
+// findServePIDs returns PIDs for running tokenomics serve processes.
+// Windows implementation is best-effort and returns no matches for now.
+func findServePIDs() ([]int, error) {
+	return nil, nil
+}

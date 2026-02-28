@@ -1,6 +1,9 @@
 # Tokenomics configuration
 # Full reference: https://github.com/rickcrawford/tokenomics/docs/CONFIGURATION.md
 
+admin:
+  enabled: true
+
 logging:
   level: info
   format: json

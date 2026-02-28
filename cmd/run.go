@@ -47,6 +47,7 @@ var (
 	runPort     int
 	runTLS      bool
 	runInsecure bool
+	runAdmin    bool
 	runProvider string
 	runEnvKey   string
 	runEnvBase  string
@@ -59,6 +60,7 @@ func init() {
 	runCmd.Flags().IntVar(&runPort, "port", 8080, "proxy port (only used if starting local proxy)")
 	runCmd.Flags().BoolVar(&runTLS, "tls", false, "use HTTPS (default false for run, traffic is localhost only)")
 	runCmd.Flags().BoolVar(&runInsecure, "insecure", false, "skip TLS verification")
+	runCmd.Flags().BoolVar(&runAdmin, "admin", false, "enable admin UI/API for run-managed ephemeral proxy")
 	runCmd.Flags().StringVar(&runProvider, "provider", "generic", "target provider (generic, anthropic, azure, gemini, custom)")
 	runCmd.Flags().StringVar(&runEnvKey, "env-key", "", "custom env var name for the API key")
 	runCmd.Flags().StringVar(&runEnvBase, "env-base-url", "", "custom env var name for the base URL")
@@ -140,6 +142,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 			runProvider = mappedProvider
 		}
 	}
+	adminEnabled := false
+	if cfg, err := config.Load(cfgFile); err == nil && cfg != nil {
+		adminEnabled = cfg.Admin.Enabled
+	}
 
 	var serveCmd *exec.Cmd
 
@@ -158,33 +164,65 @@ func runRun(cmd *cobra.Command, args []string) error {
 	baseURL := runProxyURL
 	if baseURL == "" {
 		baseURL = fmt.Sprintf("%s://%s:%d", scheme, runHost, proxyPort)
+	}
 
-		// Build serve args. Override the port via environment so we control
-		// exactly which port the ephemeral proxy binds to.
-		serveArgs := []string{"serve", "--config", cfgFile, "--db", dbPath}
-		serveCmd = exec.Command(os.Args[0], serveArgs...)
-		serveCmd.Stdout = os.Stderr
-		serveCmd.Stderr = os.Stderr
-		// Put serve subprocess in its own process group so it does not
-		// receive Ctrl+C (SIGINT) from the terminal. We send signals
-		// explicitly during cleanup to avoid a double-signal that would
-		// bypass Go's graceful shutdown handler.
-		setProcessGroup(serveCmd)
-		// Tell serve which port to bind, overriding config defaults.
-		// Always enable both HTTP and HTTPS for ephemeral proxy
-		// Preserve all parent environment variables to ensure API key env vars are available
-		serveEnv := append(os.Environ(),
-			fmt.Sprintf("TOKENOMICS_SERVER_HTTP_PORT=%d", 8080),
-			fmt.Sprintf("TOKENOMICS_DEFAULT_PROVIDER=%s", runProvider),
-		)
-		// Enable debug output if requested
-		if os.Getenv("TOKENOMICS_DEBUG_ENV") == "1" {
-			serveEnv = append(serveEnv, "TOKENOMICS_DEBUG_ENV=1")
+	// Create HTTP client with optional TLS skip
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	if runTLS && runInsecure {
+		client.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
-		serveCmd.Env = serveEnv
+	}
 
-		if err := serveCmd.Start(); err != nil {
-			return fmt.Errorf("start proxy: %w", err)
+	healthURL := fmt.Sprintf("%s/ping", baseURL)
+
+	// If no explicit remote proxy URL is provided, first try to reuse an
+	// already running local proxy at the target URL. Only start an ephemeral
+	// proxy when nothing healthy is already listening.
+	if runProxyURL == "" {
+		if !isProxyHealthy(client, healthURL) {
+			exePath, err := os.Executable()
+			if err != nil {
+				exePath = os.Args[0]
+			}
+			serveArgs := []string{"serve"}
+			if cfgFile != "" {
+				serveArgs = append(serveArgs, "--config", cfgFile)
+			}
+			if dbPath != "" {
+				serveArgs = append(serveArgs, "--db", dbPath)
+			}
+			if dirOverride != "" {
+				serveArgs = append(serveArgs, "--dir", dirOverride)
+			}
+			serveCmd = exec.Command(exePath, serveArgs...)
+			serveCmd.Stdout = os.Stderr
+			serveCmd.Stderr = os.Stderr
+			// Put serve subprocess in its own process group so it does not
+			// receive Ctrl+C (SIGINT) from the terminal. We send signals
+			// explicitly during cleanup to avoid a double-signal that would
+			// bypass Go's graceful shutdown handler.
+			setProcessGroup(serveCmd)
+			serveEnv := append(os.Environ(),
+				fmt.Sprintf("TOKENOMICS_SERVER_HTTP_PORT=%d", proxyPort),
+				fmt.Sprintf("TOKENOMICS_DEFAULT_PROVIDER=%s", runProvider),
+			)
+			if runAdmin && adminEnabled {
+				serveEnv = append(serveEnv, "TOKENOMICS_ADMIN_ENABLED=true")
+			} else {
+				serveEnv = append(serveEnv, "TOKENOMICS_ADMIN_ENABLED=false")
+			}
+			// Enable debug output if requested
+			if os.Getenv("TOKENOMICS_DEBUG_ENV") == "1" {
+				serveEnv = append(serveEnv, "TOKENOMICS_DEBUG_ENV=1")
+			}
+			serveCmd.Env = serveEnv
+
+			if err := serveCmd.Start(); err != nil {
+				return fmt.Errorf("start proxy: %w", err)
+			}
 		}
 	}
 
@@ -195,6 +233,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if serveCmd == nil || serveCmd.Process == nil {
 			return
 		}
+		_ = terminateProcessGroup(serveCmd.Process.Pid)
 		// Use SIGTERM so the serve process runs its graceful shutdown
 		// path (drain HTTP servers, close DB, etc.).
 		if err := terminateProcess(serveCmd.Process); err != nil {
@@ -213,6 +252,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 			// Exited cleanly.
 		case <-time.After(12 * time.Second):
 			// Force kill after timeout.
+			_ = killProcessGroup(serveCmd.Process.Pid)
 			_ = killProcess(serveCmd.Process)
 			<-done
 		}
@@ -226,18 +266,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Cleanup: ensure the local proxy is shut down when we return.
 	defer shutdownServe()
-
-	healthURL := fmt.Sprintf("%s/ping", baseURL)
-
-	// Create HTTP client with optional TLS skip
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-	if runTLS && runInsecure {
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-	}
 
 	// Poll for readiness (30 attempts, ~3 seconds)
 	readyErr := fmt.Errorf("proxy failed to start within 3 seconds")
@@ -264,7 +292,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if runInsecure {
 		pairs = append(pairs, EnvPair{"NODE_TLS_REJECT_UNAUTHORIZED", "0"})
 	}
-
 
 	// Prepare environment: inherit current env but remove any vars we're about to override
 	keysToSet := make(map[string]bool)
@@ -321,4 +348,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("command did not exit after signal")
 		}
 	}
+}
+
+func isProxyHealthy(client *http.Client, healthURL string) bool {
+	resp, err := client.Get(healthURL)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }

@@ -3,8 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
@@ -63,7 +65,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	// 7. Proxy running state
 	checks = append(checks, checkProxyRunning())
 
-	// 8. Remote config
+	// 8. Binary execution policy (macOS)
+	checks = append(checks, checkBinaryExecutionPolicy())
+
+	// 9. Remote config
 	if cfg.Remote.URL != "" {
 		checks = append(checks, checkRemote(cfg))
 	}
@@ -256,6 +261,43 @@ func checkRemote(cfg *config.Config) checkResult {
 		return checkResult{"remote sync", "warn", fmt.Sprintf("remote URL=%s but no api_key set", cfg.Remote.URL)}
 	}
 	return checkResult{"remote sync", "ok", fmt.Sprintf("configured for %s (sync every %ds)", cfg.Remote.URL, cfg.Remote.SyncSec)}
+}
+
+func checkBinaryExecutionPolicy() checkResult {
+	exePath, err := os.Executable()
+	if err != nil {
+		return checkResult{"binary policy", "warn", "could not determine executable path"}
+	}
+	xattrs, xattrErr := listXattrs(exePath)
+	return evaluateBinaryExecutionPolicy(runtime.GOOS, exePath, xattrs, xattrErr)
+}
+
+func evaluateBinaryExecutionPolicy(goos, exePath, xattrs string, xattrErr error) checkResult {
+	if goos != "darwin" {
+		return checkResult{"binary policy", "ok", "not applicable on this OS"}
+	}
+	if !strings.HasPrefix(exePath, "/var/tmp/") && !strings.HasPrefix(exePath, "/private/var/tmp/") {
+		return checkResult{"binary policy", "ok", "executable path is outside /var/tmp"}
+	}
+	if xattrErr != nil {
+		return checkResult{"binary policy", "warn", fmt.Sprintf("running from %s. Could not inspect xattrs: %v", exePath, xattrErr)}
+	}
+	if strings.Contains(xattrs, "com.apple.provenance") || strings.Contains(xattrs, "com.apple.quarantine") {
+		return checkResult{
+			"binary policy",
+			"warn",
+			fmt.Sprintf("running from %s with macOS xattrs (provenance/quarantine) can trigger 'killed'. Rebuild or move binary, then retry", exePath),
+		}
+	}
+	return checkResult{"binary policy", "ok", fmt.Sprintf("running from %s with no blocking xattrs detected", exePath)}
+}
+
+var listXattrs = func(path string) (string, error) {
+	out, err := exec.Command("xattr", "-l", path).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 func printChecks(checks []checkResult) {

@@ -109,9 +109,11 @@ export TOKENOMICS_KEY="tkn_<paste-your-token-here>"
 tokenomics run python my_script.py
 ```
 
-The `run` command starts the proxy, configures environment variables, runs your command, and cleans up. No separate server setup needed.
+The `run` command starts the proxy, configures environment variables, runs your command, and cleans up. No separate server setup needed. Admin is disabled for this ephemeral proxy unless you pass `--admin` and `admin.enabled` is true in config.
 
 **Default directory:** Tokenomics stores data (tokens, ledger, certs) in `~/.tokenomics/` by default. Use `--dir .tokenomics` to use the current directory, or `--dir /path` for a custom location.
+
+**Embedded admin UI:** Start the proxy and open `http://localhost:8080` or `https://localhost:8443` to view analytics, keys, sessions, and memory dashboards.
 
 See [examples/](examples/) for provider configs, sample policies, and an end-to-end walkthrough.
 
@@ -158,6 +160,8 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 | [Events & Webhooks](docs/EVENTS.md) | Webhook events for token CRUD, rule violations, budget alerts |
 | [Multi-Model Routing](docs/MULTI_MODEL_ROUTING.md) | Provider routing, model matching, auth schemes, fallback chains |
 | [Session Ledger](docs/LEDGER.md) | Per-session token tracking, CLI commands, session JSON format |
+| [Web Admin](docs/WEB.md) | Embedded admin UI routes, APIs, auth, and architecture |
+| [Admin UI Guide](docs/ADMIN_UI.md) | Admin tabs, policy editor workflow, embedded docs, and maintenance |
 | [Distribution](docs/DISTRIBUTION.md) | Installation methods, pre-built binaries, release process |
 | [OpenClaw Integration](docs/OPENCLAW_INTEGRATION.md) | Connect OpenClaw agents to Tokenomics guardrails |
 

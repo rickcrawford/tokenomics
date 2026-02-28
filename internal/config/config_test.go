@@ -3,8 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
 func setenv(t *testing.T, key, value string) {
@@ -412,6 +415,42 @@ func TestDefaultProviders(t *testing.T) {
 	if ollama.ChatPath != "/api/chat" {
 		t.Errorf("ollama.ChatPath = %q, want /api/chat", ollama.ChatPath)
 	}
+}
+
+func TestEmbeddedProvidersYAMLSyncedWithRootProvidersYAML(t *testing.T) {
+	rootPath := filepath.Join("..", "..", "providers.yaml")
+	embeddedPath := filepath.Join("providers.embedded.yaml")
+
+	rootProviders, err := loadProvidersFromYAML(rootPath)
+	if err != nil {
+		t.Fatalf("load root providers.yaml: %v", err)
+	}
+	embeddedProviders, err := loadProvidersFromYAML(embeddedPath)
+	if err != nil {
+		t.Fatalf("load embedded providers yaml: %v", err)
+	}
+
+	if !reflect.DeepEqual(rootProviders, embeddedProviders) {
+		t.Fatalf("embedded providers yaml is out of sync with root providers.yaml")
+	}
+}
+
+func loadProvidersFromYAML(path string) (map[string]ProviderConfig, error) {
+	v := viper.New()
+	v.SetConfigFile(path)
+	if err := v.ReadInConfig(); err != nil {
+		return nil, err
+	}
+	var wrapper struct {
+		Providers map[string]ProviderConfig `mapstructure:"providers"`
+	}
+	if err := v.Unmarshal(&wrapper); err != nil {
+		return nil, err
+	}
+	if wrapper.Providers == nil {
+		wrapper.Providers = map[string]ProviderConfig{}
+	}
+	return wrapper.Providers, nil
 }
 
 func TestLoadProviders_ReturnsDefaults(t *testing.T) {
