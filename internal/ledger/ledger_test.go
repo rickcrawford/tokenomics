@@ -12,7 +12,7 @@ import (
 func TestOpenAndClose(t *testing.T) {
 	dir := t.TempDir()
 
-	l, err := Open(dir, false)
+	l, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestOpenAndClose(t *testing.T) {
 func TestOpenWithMemory(t *testing.T) {
 	dir := t.TempDir()
 
-	l, err := Open(dir, true)
+	l, err := Open(dir, true, false)
 	if err != nil {
 		t.Fatalf("Open with memory: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestOpenWithMemory(t *testing.T) {
 func TestRecordRequestAndSummary(t *testing.T) {
 	dir := t.TempDir()
 
-	l, err := Open(dir, false)
+	l, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestRecordRequestAndSummary(t *testing.T) {
 
 func TestErrorAndRetryCounters(t *testing.T) {
 	dir := t.TempDir()
-	l, err := Open(dir, false)
+	l, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestReadSessionFilesEmpty(t *testing.T) {
 
 func TestSessionSummaryJSON(t *testing.T) {
 	dir := t.TempDir()
-	l, err := Open(dir, false)
+	l, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestGenerateSessionID(t *testing.T) {
 
 func TestConcurrentRecordRequest(t *testing.T) {
 	dir := t.TempDir()
-	l, err := Open(dir, false)
+	l, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestMultipleSessions(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create two sessions in the same directory
-	l1, err := Open(dir, false)
+	l1, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open l1: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestMultipleSessions(t *testing.T) {
 		t.Fatalf("Close l1: %v", err)
 	}
 
-	l2, err := Open(dir, false)
+	l2, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open l2: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestReadSessionFilesSkipsCorrupted(t *testing.T) {
 
 func TestEmptySessionClose(t *testing.T) {
 	dir := t.TempDir()
-	l, err := Open(dir, false)
+	l, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestEmptySessionClose(t *testing.T) {
 
 func TestRecordMemoryNoWriter(t *testing.T) {
 	dir := t.TempDir()
-	l, err := Open(dir, false) // memory=false
+	l, err := Open(dir, false, false) // memory=false
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -479,7 +479,7 @@ func TestRecordMemoryNoWriter(t *testing.T) {
 
 func TestRecordMemoryUsesSessionFile(t *testing.T) {
 	dir := t.TempDir()
-	l, err := Open(dir, true)
+	l, err := Open(dir, true, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestRecordMemoryUsesSessionFile(t *testing.T) {
 
 func TestTokenRollupMultiModel(t *testing.T) {
 	dir := t.TempDir()
-	l, err := Open(dir, false)
+	l, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestTokenRollupMultiModel(t *testing.T) {
 
 func TestSessionFileNaming(t *testing.T) {
 	dir := t.TempDir()
-	l, err := Open(dir, false)
+	l, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestSessionFileNaming(t *testing.T) {
 
 func TestCacheCreationTokenRollup(t *testing.T) {
 	dir := t.TempDir()
-	l, err := Open(dir, false)
+	l, err := Open(dir, false, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -638,6 +638,52 @@ func TestContainsStr(t *testing.T) {
 	}
 	if !containsStr([]string{"a", "b"}, "b") {
 		t.Error("should find 'b'")
+	}
+}
+
+func TestRecordCommunicationEvent_PersistedWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, false, true)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	err = l.RecordCommunicationEvent(CommunicationEvent{
+		Type:        CommunicationEventRequestReceived,
+		TokenHash:   "abc123",
+		Method:      "POST",
+		Path:        "/v1/chat/completions",
+		ContentType: "application/json",
+		Headers: map[string][]string{
+			"Content-Type": []string{"application/json"},
+		},
+		Body:      `{"model":"gpt-4o"}`,
+		BodyBytes: 18,
+	})
+	if err != nil {
+		t.Fatalf("RecordCommunicationEvent: %v", err)
+	}
+
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sessions, err := ReadSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("ReadSessionFiles: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if len(sessions[0].CommunicationEvents) != 1 {
+		t.Fatalf("expected 1 communication event, got %d", len(sessions[0].CommunicationEvents))
+	}
+	ev := sessions[0].CommunicationEvents[0]
+	if ev.Type != CommunicationEventRequestReceived {
+		t.Fatalf("expected type %s, got %s", CommunicationEventRequestReceived, ev.Type)
+	}
+	if ev.Method != "POST" || ev.Path != "/v1/chat/completions" {
+		t.Fatalf("unexpected request metadata: %s %s", ev.Method, ev.Path)
 	}
 }
 

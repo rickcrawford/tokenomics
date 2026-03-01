@@ -6,9 +6,9 @@
    |_|\___/|_|\_\___|_| |_|\___/|_| |_| |_|_|\___|___/
 ```
 
-> **Personal Guardrails for Token Usage** - Control costs, enforce safety, and track consumption across your AI agents.
+> **Personal Guardrails for Token Usage** - Safety first (PII, prompts, rules), then scoped tokens with request and cost controls.
 
-Tokenomics is an OpenAI-compatible reverse proxy that acts as a guardrail system for LLM usage. Instead of giving agents direct access to your API keys, issue scoped wrapper tokens bound to guardrail policies. Each token controls what models can be used, how much can be spent, what content is allowed, and what gets recorded.
+Tokenomics is an OpenAI-compatible reverse proxy you run yourself. It gives you the features of an AI gateway (guardrails, budgets, rate limits, multi-provider routing) but under your control from your client. No vendor lock-in, no sending traffic through a third party. Issue scoped wrapper tokens instead of raw API keys; each token enforces what models, content, and spend are allowed.
 
 One binary. Zero code changes. Drop it in front of any agent that speaks the OpenAI protocol.
 
@@ -20,25 +20,25 @@ One binary. Zero code changes. Drop it in front of any agent that speaks the Ope
 
 ## What It Does
 
-### 🛑 Cost Guardrails
+### 🔒 Safety Guardrails (First)
 
-Prevent overspending before it happens. Every wrapper token has a budget, rate limits, and model restrictions. When limits are reached, the proxy blocks requests—no surprises on the invoice.
+Content inspection runs on every request before it hits the provider. PII, prompts, and rules stay under your control.
 
-- **Token budgets** with daily, hourly, and monthly caps
-- **Rate limiting** on requests/min, tokens/hour, and max parallel requests
-- **Model allowlists** so not every task burns through your most expensive models
-- **Token expiration** with durations (24h, 7d) or exact timestamps for temporary access
-- **Multi-provider routing** to send requests to the cheapest provider that fits your constraints
-
-### 🔒 Safety Guardrails
-
-Content inspection runs on every request before it reaches the provider. Detect and block prompt injections, redact PII, enforce output policies, or log everything for audit.
-
-- **Jailbreak detection** blocks prompt injection attempts that try to override instructions
 - **PII masking** auto-redacts SSNs, credit cards, emails, API keys, private keys, and 6 more types
-- **Content rules** using regex, keyword, and pattern matching with fail/warn/log/mask actions
-- **System prompts** injected server-side so agents always operate under the right instructions
-- **Retry and fallback** chains automatically recover from provider failures with cheaper models
+- **Content rules** regex, keyword, and PII rules with fail/warn/log/mask on input, output, or both
+- **System prompts** injected server-side so agents always run under the right instructions
+- **Jailbreak detection** blocks prompt injection attempts that try to override instructions
+- **Retry and fallback** chains recover from provider failures with cheaper models
+
+### 🛑 PATs with Request and Cost Controls
+
+Create scoped tokens (PATs) instead of handing out API keys. Each token has budgets, rate limits, and model restrictions. When limits are hit, the proxy blocks requests.
+
+- **Token budgets** daily, hourly, and monthly caps per token
+- **Rate limiting** requests/min, tokens/hour, max parallel; sliding or fixed window
+- **Model allowlists** so not every task burns your most expensive models
+- **Token expiration** durations (24h, 7d) or exact timestamps for temporary access
+- **Multi-provider routing** send requests to the provider that fits your constraints
 
 ### 📋 Usage Tracking
 
@@ -121,15 +121,15 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 
 | Guardrail Type | Feature | Description |
 |---|---|---|
+| **Safety** | PII masking | Auto-redact SSNs, credit cards, emails, API keys, and 7 more types |
+| **Safety** | Content rules | Regex, keyword, and PII rules with fail/warn/log/mask actions |
+| **Safety** | System prompts | Server-side instruction injection on every request |
+| **Safety** | Jailbreak detection | Detect prompt injection attempts that override instructions |
+| **Safety** | Retry and fallback | Auto-recover from failures with model fallback chains |
 | **Cost Control** | Token budgets | Per-token daily/monthly spending caps |
 | **Cost Control** | Rate limiting | Requests/min, tokens/hour, max parallel; sliding or fixed window |
 | **Cost Control** | Model allowlists | Exact match or regex-based model filtering |
 | **Cost Control** | Token expiration | Temporary access with durations (24h, 7d) or timestamps |
-| **Safety** | Jailbreak detection | Detect prompt injection attempts that override instructions |
-| **Safety** | Content rules | Regex, keyword, and PII rules with fail/warn/log/mask actions |
-| **Safety** | PII masking | Auto-redact SSNs, credit cards, emails, API keys, and 7 more types |
-| **Safety** | System prompts | Server-side instruction injection on every request |
-| **Safety** | Retry and fallback | Auto-recover from failures with model fallback chains |
 | **Tracking** | Conversation logs | Per-token markdown logs of user/assistant exchanges |
 | **Tracking** | Redis backend | Shared memory across distributed agents |
 | **Tracking** | Session JSON | Per-session logs with request-level detail and rollups |
@@ -167,7 +167,7 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 
 ## OpenClaw Integration
 
-Tokenomics provides personal guardrails for OpenClaw autonomous agents. Set budgets, enforce safety policies, and track costs across distributed agent fleets—all without modifying agent code.
+Tokenomics provides personal guardrails for OpenClaw autonomous agents. Set budgets, enforce safety policies, and track costs across distributed agent fleets, all without modifying agent code.
 
 **Example:** Run a Slack bot with:
 - Daily budget: 1M tokens

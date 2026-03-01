@@ -24,8 +24,8 @@ with environment variables configured to use the proxy. The proxy is automatical
 shut down when the command exits.
 
 Unlike 'start', which runs a persistent daemon, 'run' creates an ephemeral proxy
-that lives only for the duration of the command. It defaults to plain HTTP on
-localhost since traffic never leaves the machine.
+that lives only for the duration of the command. It defaults to HTTPS on
+localhost with port 8443.
 
 If --proxy-url or $TOKENOMICS_PROXY_URL is set, uses a remote proxy instead
 of starting a local one.
@@ -48,6 +48,7 @@ var (
 	runTLS      bool
 	runInsecure bool
 	runAdmin    bool
+	runPrintEnv bool
 	runProvider string
 	runEnvKey   string
 	runEnvBase  string
@@ -57,10 +58,11 @@ func init() {
 	runCmd.Flags().StringVar(&runToken, "token", "", "wrapper token (read from $TOKENOMICS_KEY if not provided)")
 	runCmd.Flags().StringVar(&runProxyURL, "proxy-url", "", "remote proxy URL (read from $TOKENOMICS_PROXY_URL if not provided; if set, uses remote proxy instead of starting local)")
 	runCmd.Flags().StringVar(&runHost, "host", "localhost", "proxy hostname (only used if starting local proxy)")
-	runCmd.Flags().IntVar(&runPort, "port", 8080, "proxy port (only used if starting local proxy)")
-	runCmd.Flags().BoolVar(&runTLS, "tls", false, "use HTTPS (default false for run, traffic is localhost only)")
+	runCmd.Flags().IntVar(&runPort, "port", 8443, "proxy port (only used if starting local proxy)")
+	runCmd.Flags().BoolVar(&runTLS, "tls", true, "use HTTPS (default true for run)")
 	runCmd.Flags().BoolVar(&runInsecure, "insecure", false, "skip TLS verification")
 	runCmd.Flags().BoolVar(&runAdmin, "admin", false, "enable admin UI/API for run-managed ephemeral proxy")
+	runCmd.Flags().BoolVar(&runPrintEnv, "print-env", false, "print injected environment variables before executing command")
 	runCmd.Flags().StringVar(&runProvider, "provider", "generic", "target provider (generic, anthropic, azure, gemini, custom)")
 	runCmd.Flags().StringVar(&runEnvKey, "env-key", "", "custom env var name for the API key")
 	runCmd.Flags().StringVar(&runEnvBase, "env-base-url", "", "custom env var name for the base URL")
@@ -166,11 +168,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 		baseURL = fmt.Sprintf("%s://%s:%d", scheme, runHost, proxyPort)
 	}
 
-	// Create HTTP client with optional TLS skip
+	// Create HTTP client used for readiness checks.
+	// For local TLS ephemeral runs, always skip certificate verification so
+	// startup does not depend on trust store installation.
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
-	if runTLS && runInsecure {
+	if runTLS && (runInsecure || runProxyURL == "") {
 		client.Transport = &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
@@ -206,9 +210,22 @@ func runRun(cmd *cobra.Command, args []string) error {
 			// bypass Go's graceful shutdown handler.
 			setProcessGroup(serveCmd)
 			serveEnv := append(os.Environ(),
-				fmt.Sprintf("TOKENOMICS_SERVER_HTTP_PORT=%d", proxyPort),
 				fmt.Sprintf("TOKENOMICS_DEFAULT_PROVIDER=%s", runProvider),
 			)
+			if runTLS {
+				// Avoid self-conflict by disabling HTTP and binding HTTPS only.
+				serveEnv = append(serveEnv,
+					"TOKENOMICS_SERVER_HTTP_PORT=0",
+					"TOKENOMICS_SERVER_TLS_ENABLED=true",
+					fmt.Sprintf("TOKENOMICS_SERVER_HTTPS_PORT=%d", proxyPort),
+				)
+			} else {
+				// HTTP-only mode for explicit non-TLS runs.
+				serveEnv = append(serveEnv,
+					fmt.Sprintf("TOKENOMICS_SERVER_HTTP_PORT=%d", proxyPort),
+					"TOKENOMICS_SERVER_TLS_ENABLED=false",
+				)
+			}
 			if runAdmin && adminEnabled {
 				serveEnv = append(serveEnv, "TOKENOMICS_ADMIN_ENABLED=true")
 			} else {
@@ -289,6 +306,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// Build environment variables for the proxy
 	pairs := ResolveEnvPairs(runProvider, runToken, baseURL, runEnvKey, runEnvBase)
 
+	// Backward compatibility: --insecure also propagates to child process TLS checks.
+	// This allows CLIs (for example Claude Code) to connect to local self-signed TLS endpoints.
 	if runInsecure {
 		pairs = append(pairs, EnvPair{"NODE_TLS_REJECT_UNAUTHORIZED", "0"})
 	}
@@ -313,6 +332,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// Add proxy config (overriding any inherited values)
 	for _, p := range pairs {
 		env = append(env, fmt.Sprintf("%s=%s", p.Key, p.Value))
+	}
+	if runPrintEnv {
+		fmt.Fprintln(os.Stderr, "tokenomics run - injected environment:")
+		for _, p := range pairs {
+			fmt.Fprintf(os.Stderr, "  %s=%s\n", p.Key, p.Value)
+		}
 	}
 
 	// Execute user command with proxy environment

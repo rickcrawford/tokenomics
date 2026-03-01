@@ -144,8 +144,9 @@ type SecurityConfig struct {
 // LedgerConfig controls per-session token tracking.
 // Files are always written to the main `dir` setting (typically ~/.tokenomics).
 type LedgerConfig struct {
-	Enabled bool `mapstructure:"enabled"` // Enable session ledger (default true)
-	Memory  bool `mapstructure:"memory"`  // Record conversation content (default true)
+	Enabled     bool `mapstructure:"enabled"`      // Enable session ledger (default true)
+	Memory      bool `mapstructure:"memory"`       // Record conversation content (default true)
+	EventLedger bool `mapstructure:"event_ledger"` // Capture structured communication events (default false, dual-write phase)
 }
 
 func Load(cfgFile string) (*Config, error) {
@@ -188,6 +189,7 @@ func Load(cfgFile string) (*Config, error) {
 	v.SetDefault("logging.file.path", "")                   // empty = resolve to {dir}/tokenomics.log
 	v.SetDefault("ledger.enabled", true)                    // Enable session ledger by default
 	v.SetDefault("ledger.memory", true)                     // Record conversation content
+	v.SetDefault("ledger.event_ledger", false)              // Phase 1 dual-write: off by default
 
 	v.SetEnvPrefix("TOKENOMICS")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

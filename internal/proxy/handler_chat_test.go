@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/rickcrawford/tokenomics/internal/ledger"
 	"github.com/rickcrawford/tokenomics/internal/policy"
 	"github.com/rickcrawford/tokenomics/internal/session"
 	"github.com/rickcrawford/tokenomics/internal/tokencount"
@@ -1012,6 +1013,12 @@ func TestHandler_StreamingMemoryDoesNotStoreRawSSE(t *testing.T) {
 	if !strings.Contains(content, "Hello world") {
 		t.Fatalf("expected assistant text in memory, got: %s", content)
 	}
+	if !strings.Contains(content, "[streaming sse]") || !strings.Contains(content, "SSE events:") {
+		t.Fatalf("expected parsed SSE section in memory, got: %s", content)
+	}
+	if !strings.Contains(content, "[DONE]") {
+		t.Fatalf("expected [DONE] marker in parsed SSE memory, got: %s", content)
+	}
 	if strings.Contains(content, "data: {") || strings.Contains(content, "data: [DONE]") {
 		t.Fatalf("expected no raw SSE frames in memory, got: %s", content)
 	}
@@ -1083,5 +1090,157 @@ func TestHandler_StreamingResponseLongSSELine(t *testing.T) {
 	}
 	if strings.Contains(string(data), "data: {") {
 		t.Fatalf("expected no raw SSE JSON frames in memory file")
+	}
+}
+
+func TestHandler_StreamingLedgerEvents_ChunkOrder(t *testing.T) {
+	t.Setenv("STREAM_EVT_KEY", "sk-stream-event")
+	ledgerDir := t.TempDir()
+
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "data: {\"id\":\"chatcmpl-stream\",\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n\n")
+		fmt.Fprint(w, "data: {\"id\":\"chatcmpl-stream\",\"choices\":[{\"delta\":{\"content\":\"B\"}}],\"usage\":{\"completion_tokens\":2}}\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	})
+	defer upstream.Close()
+
+	l, err := ledger.Open(ledgerDir, false, true)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	handler.SetLedger(l)
+
+	token := "tkn_stream_evt"
+	tokenHash := hashForTest(handler, token)
+	pol := &policy.Policy{BaseKeyEnv: "STREAM_EVT_KEY"}
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
+	ts.Save(tokenHash, pol)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
+		`{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+	))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if err := l.Close(); err != nil {
+		t.Fatalf("close ledger: %v", err)
+	}
+	sessions, err := ledger.ReadSessionFiles(ledgerDir)
+	if err != nil {
+		t.Fatalf("read sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	var chunkBodies []string
+	for _, ev := range sessions[0].CommunicationEvents {
+		if ev.Type == ledger.CommunicationEventResponseChunk {
+			chunkBodies = append(chunkBodies, ev.Body)
+		}
+	}
+	if len(chunkBodies) < 2 {
+		t.Fatalf("expected at least 2 chunk events, got %d", len(chunkBodies))
+	}
+	if chunkBodies[0] != `{"id":"chatcmpl-stream","choices":[{"delta":{"content":"A"}}]}` {
+		t.Fatalf("unexpected first chunk body: %q", chunkBodies[0])
+	}
+	if chunkBodies[1] != `{"id":"chatcmpl-stream","choices":[{"delta":{"content":"B"}}],"usage":{"completion_tokens":2}}` {
+		t.Fatalf("unexpected second chunk body: %q", chunkBodies[1])
+	}
+}
+
+func TestHandler_RetryLedgerEvents_Sequence(t *testing.T) {
+	t.Setenv("RETRY_EVT_KEY", "sk-retry-event")
+	ledgerDir := t.TempDir()
+	var callCount int
+
+	handler, ts, upstream := setupTestHandler(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		if callCount == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"error":{"message":"temporary"}}`)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"id":"chatcmpl-ok","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"completion_tokens":1}}`)
+	})
+	defer upstream.Close()
+
+	l, err := ledger.Open(ledgerDir, false, true)
+	if err != nil {
+		t.Fatalf("open ledger: %v", err)
+	}
+	handler.SetLedger(l)
+
+	token := "tkn_retry_evt"
+	tokenHash := hashForTest(handler, token)
+	pol := &policy.Policy{
+		BaseKeyEnv: "RETRY_EVT_KEY",
+		Retry: &policy.RetryConfig{
+			MaxRetries: 1,
+			RetryOn:    []int{500},
+		},
+	}
+	if err := pol.Validate(); err != nil {
+		t.Fatalf("validate policy: %v", err)
+	}
+	ts.Save(tokenHash, pol)
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(
+		`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`,
+	))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := l.Close(); err != nil {
+		t.Fatalf("close ledger: %v", err)
+	}
+
+	sessions, err := ledger.ReadSessionFiles(ledgerDir)
+	if err != nil {
+		t.Fatalf("read sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	var startedCount, bodyCount, doneCount int
+	var lastDone ledger.CommunicationEvent
+	for _, ev := range sessions[0].CommunicationEvents {
+		if ev.Type == ledger.CommunicationEventResponseStarted {
+			startedCount++
+		}
+		if ev.Type == ledger.CommunicationEventResponseBody {
+			bodyCount++
+		}
+		if ev.Type == ledger.CommunicationEventResponseDone {
+			doneCount++
+			lastDone = ev
+		}
+	}
+	if startedCount != 1 {
+		t.Fatalf("expected exactly 1 response.started event for final attempt, got %d", startedCount)
+	}
+	if bodyCount != 1 {
+		t.Fatalf("expected exactly 1 response.body event for final attempt, got %d", bodyCount)
+	}
+	if doneCount == 0 {
+		t.Fatal("expected a response.completed event")
+	}
+	if lastDone.RetryCount != 1 {
+		t.Fatalf("expected completed event retry_count=1, got %d", lastDone.RetryCount)
 	}
 }

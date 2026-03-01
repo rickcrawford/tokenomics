@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,11 +23,13 @@ type Ledger struct {
 	startedAt time.Time
 	gitInfo   GitInfo
 	memory    bool
+	events    bool
 
 	memWriter session.MemoryWriter
 
-	mu       sync.Mutex
-	requests []RequestEntry
+	mu                  sync.Mutex
+	requests            []RequestEntry
+	communicationEvents []CommunicationEvent
 }
 
 // RequestEntry captures a single proxied request.
@@ -99,22 +103,54 @@ type SessionTotals struct {
 
 // SessionSummary is the top-level JSON written to sessions/<date>_<id>.json.
 type SessionSummary struct {
-	SessionID  string                  `json:"session_id"`
-	StartedAt  string                  `json:"started_at"`
-	EndedAt    string                  `json:"ended_at"`
-	DurationMs int64                   `json:"duration_ms"`
-	Git        GitInfo                 `json:"git"`
-	Totals     SessionTotals           `json:"totals"`
-	ByModel    map[string]*UsageRollup `json:"by_model"`
-	ByProvider map[string]*UsageRollup `json:"by_provider"`
-	ByToken    map[string]*TokenRollup `json:"by_token"`
-	Requests   []RequestEntry          `json:"requests"`
+	SessionID           string                  `json:"session_id"`
+	StartedAt           string                  `json:"started_at"`
+	EndedAt             string                  `json:"ended_at"`
+	DurationMs          int64                   `json:"duration_ms"`
+	Git                 GitInfo                 `json:"git"`
+	Totals              SessionTotals           `json:"totals"`
+	ByModel             map[string]*UsageRollup `json:"by_model"`
+	ByProvider          map[string]*UsageRollup `json:"by_provider"`
+	ByToken             map[string]*TokenRollup `json:"by_token"`
+	Requests            []RequestEntry          `json:"requests"`
+	CommunicationEvents []CommunicationEvent    `json:"communication_events,omitempty"`
+}
+
+// CommunicationEventType constants for request/response lifecycle events.
+const (
+	CommunicationEventRequestReceived = "request.received"
+	CommunicationEventResponseStarted = "response.started"
+	CommunicationEventResponseChunk   = "response.chunk"
+	CommunicationEventResponseBody    = "response.body"
+	CommunicationEventResponseDone    = "response.completed"
+	CommunicationEventResponseError   = "response.error"
+)
+
+// CommunicationEvent captures raw request/response communication details.
+// Stored separately from RequestEntry rollups for diagnostics and replay.
+type CommunicationEvent struct {
+	Timestamp   time.Time           `json:"timestamp"`
+	Type        string              `json:"type"`
+	TokenHash   string              `json:"token_hash,omitempty"`
+	Model       string              `json:"model,omitempty"`
+	Provider    string              `json:"provider,omitempty"`
+	Method      string              `json:"method,omitempty"`
+	Path        string              `json:"path,omitempty"`
+	StatusCode  int                 `json:"status_code,omitempty"`
+	ContentType string              `json:"content_type,omitempty"`
+	Headers     map[string][]string `json:"headers,omitempty"`
+	Body        string              `json:"body,omitempty"`
+	BodyBytes   int                 `json:"body_bytes,omitempty"`
+	ChunkIndex  int                 `json:"chunk_index,omitempty"`
+	Stream      bool                `json:"stream,omitempty"`
+	RetryCount  int                 `json:"retry_count,omitempty"`
+	Error       string              `json:"error,omitempty"`
 }
 
 // Open creates a new Ledger session. It creates the .tokenomics/sessions/
 // and .tokenomics/memory/ directories if they don't exist, snapshots git
 // context, and generates a session ID.
-func Open(dir string, memory bool) (*Ledger, error) {
+func Open(dir string, memory bool, events bool) (*Ledger, error) {
 	sessDir := filepath.Join(dir, "sessions")
 	if err := os.MkdirAll(sessDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
@@ -140,6 +176,7 @@ func Open(dir string, memory bool) (*Ledger, error) {
 		startedAt: time.Now().UTC(),
 		gitInfo:   snapshotGit(),
 		memory:    memory,
+		events:    events,
 		memWriter: memWriter,
 	}, nil
 }
@@ -149,6 +186,33 @@ func (l *Ledger) RecordRequest(entry RequestEntry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.requests = append(l.requests, entry)
+}
+
+// EventsEnabled indicates whether communication event capture is enabled.
+func (l *Ledger) EventsEnabled() bool {
+	return l != nil && l.events
+}
+
+// RecordCommunicationEvent appends a communication event and optionally mirrors
+// it into memory markdown when memory logging is enabled.
+func (l *Ledger) RecordCommunicationEvent(ev CommunicationEvent) error {
+	if !l.EventsEnabled() {
+		return nil
+	}
+	if ev.Timestamp.IsZero() {
+		ev.Timestamp = time.Now().UTC()
+	}
+
+	l.mu.Lock()
+	l.communicationEvents = append(l.communicationEvents, ev)
+	l.mu.Unlock()
+
+	if l.memWriter != nil {
+		if err := l.memWriter.Append(l.sessionID, "event", ev.Model, formatCommunicationEvent(ev)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RecordMemory writes conversation content to the memory log.
@@ -184,12 +248,14 @@ func (l *Ledger) Close() error {
 	l.mu.Lock()
 	requests := make([]RequestEntry, len(l.requests))
 	copy(requests, l.requests)
+	commEvents := make([]CommunicationEvent, len(l.communicationEvents))
+	copy(commEvents, l.communicationEvents)
 	l.mu.Unlock()
 
 	endedAt := time.Now().UTC()
 	l.gitInfo.CommitEnd = snapshotGitEnd()
 
-	summary := l.buildSummary(requests, endedAt)
+	summary := l.buildSummary(requests, commEvents, endedAt)
 
 	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
@@ -208,17 +274,18 @@ func (l *Ledger) Close() error {
 	return nil
 }
 
-func (l *Ledger) buildSummary(requests []RequestEntry, endedAt time.Time) *SessionSummary {
+func (l *Ledger) buildSummary(requests []RequestEntry, commEvents []CommunicationEvent, endedAt time.Time) *SessionSummary {
 	summary := &SessionSummary{
-		SessionID:  l.sessionID,
-		StartedAt:  l.startedAt.Format(time.RFC3339),
-		EndedAt:    endedAt.Format(time.RFC3339),
-		DurationMs: endedAt.Sub(l.startedAt).Milliseconds(),
-		Git:        l.gitInfo,
-		ByModel:    make(map[string]*UsageRollup),
-		ByProvider: make(map[string]*UsageRollup),
-		ByToken:    make(map[string]*TokenRollup),
-		Requests:   requests,
+		SessionID:           l.sessionID,
+		StartedAt:           l.startedAt.Format(time.RFC3339),
+		EndedAt:             endedAt.Format(time.RFC3339),
+		DurationMs:          endedAt.Sub(l.startedAt).Milliseconds(),
+		Git:                 l.gitInfo,
+		ByModel:             make(map[string]*UsageRollup),
+		ByProvider:          make(map[string]*UsageRollup),
+		ByToken:             make(map[string]*TokenRollup),
+		Requests:            requests,
+		CommunicationEvents: commEvents,
 	}
 
 	for _, req := range requests {
@@ -282,6 +349,55 @@ func (l *Ledger) buildSummary(requests []RequestEntry, endedAt time.Time) *Sessi
 	}
 
 	return summary
+}
+
+func formatCommunicationEvent(ev CommunicationEvent) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Event: %s\n", ev.Type)
+	if ev.Method != "" || ev.Path != "" {
+		fmt.Fprintf(&b, "Request: %s %s\n", ev.Method, ev.Path)
+	}
+	if ev.StatusCode > 0 {
+		fmt.Fprintf(&b, "Status: %d\n", ev.StatusCode)
+	}
+	if ev.ContentType != "" {
+		fmt.Fprintf(&b, "Content-Type: %s\n", ev.ContentType)
+	}
+	if ev.Stream {
+		b.WriteString("Stream: true\n")
+	}
+	if ev.ChunkIndex > 0 {
+		fmt.Fprintf(&b, "Chunk-Index: %d\n", ev.ChunkIndex)
+	}
+	if ev.RetryCount > 0 {
+		fmt.Fprintf(&b, "Retry-Count: %d\n", ev.RetryCount)
+	}
+	if ev.Error != "" {
+		fmt.Fprintf(&b, "Error: %s\n", ev.Error)
+	}
+	if len(ev.Headers) > 0 {
+		b.WriteString("Headers:\n")
+		keys := make([]string, 0, len(ev.Headers))
+		for k := range ev.Headers {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			for _, v := range ev.Headers[k] {
+				fmt.Fprintf(&b, "  %s: %s\n", k, v)
+			}
+		}
+	}
+	b.WriteString("\nBody:\n")
+	if ev.Body == "" {
+		b.WriteString("(empty)\n")
+	} else {
+		b.WriteString(ev.Body)
+		if !strings.HasSuffix(ev.Body, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 func addToRollup(m map[string]*UsageRollup, key string, in, out, cached, cacheCreate, reasoning int64) {

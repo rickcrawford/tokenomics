@@ -176,7 +176,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Init session ledger (if enabled)
 	var sessionLedger *ledger.Ledger
 	if cfg.Ledger.Enabled {
-		l, err := ledger.Open(cfg.Dir, cfg.Ledger.Memory)
+		l, err := ledger.Open(cfg.Dir, cfg.Ledger.Memory, cfg.Ledger.EventLedger)
 		if err != nil {
 			log.Printf("Warning: could not open ledger: %v (continuing without ledger)", err)
 		} else {

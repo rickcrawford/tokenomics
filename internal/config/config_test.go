@@ -213,6 +213,33 @@ server:
 	if cfg.Logging.ProxyLogFile != "proxy.log" {
 		t.Errorf("Logging.ProxyLogFile = %q, want proxy.log", cfg.Logging.ProxyLogFile)
 	}
+	if cfg.Ledger.EventLedger {
+		t.Error("Ledger.EventLedger should default to false")
+	}
+}
+
+func TestLoadConfig_LedgerEventFlag(t *testing.T) {
+	dir := t.TempDir()
+	configYAML := `
+server:
+  upstream_url: https://api.openai.com
+ledger:
+  enabled: true
+  memory: true
+  event_ledger: true
+`
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(configYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if !cfg.Ledger.EventLedger {
+		t.Fatal("expected Ledger.EventLedger to be true")
+	}
 }
 
 func TestLoadConfig_LoggingOverrides(t *testing.T) {

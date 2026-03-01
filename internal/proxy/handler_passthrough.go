@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rickcrawford/tokenomics/internal/config"
+	"github.com/rickcrawford/tokenomics/internal/ledger"
 	"github.com/rickcrawford/tokenomics/internal/policy"
 )
 
@@ -91,11 +92,10 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 		return
 	}
 
-	// Extract model and messages from request body for memory recording
+	// Extract model and request body for memory recording
 	var requestBody []byte
 	var reqBody map[string]interface{}
 	var model string
-	var userContent string
 	if r.Body != nil {
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBodySize))
 		if err == nil {
@@ -104,11 +104,25 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 				if m, ok := reqBody["model"].(string); ok {
 					model = m
 				}
-				userContent = extractUserContentFromRequest(reqBody)
 			}
 			// Restore body for the actual request
 			r.Body = io.NopCloser(bytes.NewReader(body))
 		}
+	}
+	if len(requestBody) > 0 {
+		reqBodyForEvent, reqBytes := bodyForEvent(r.Header.Get("Content-Type"), requestBody, maxMemoryContentSize)
+		h.recordCommunicationEvent(ledger.CommunicationEvent{
+			Type:        ledger.CommunicationEventRequestReceived,
+			TokenHash:   safePrefix(tokenHash, 16),
+			Model:       model,
+			Provider:    providerName,
+			Method:      r.Method,
+			Path:        r.URL.Path,
+			ContentType: r.Header.Get("Content-Type"),
+			Headers:     cloneHeadersForEvent(r.Header),
+			Body:        reqBodyForEvent,
+			BodyBytes:   reqBytes,
+		})
 	}
 
 	lw := newLoggingResponseWriter(w)
@@ -170,10 +184,19 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 
 	proxy.ServeHTTP(streamWriter, r.WithContext(ctx))
 	logEntry.StatusCode = lw.statusCode
+	h.recordCommunicationEvent(ledger.CommunicationEvent{
+		Type:        ledger.CommunicationEventResponseStarted,
+		TokenHash:   safePrefix(tokenHash, 16),
+		Model:       model,
+		Provider:    providerName,
+		StatusCode:  lw.statusCode,
+		ContentType: streamWriter.Header().Get("Content-Type"),
+		Headers:     cloneHeadersForEvent(streamWriter.Header()),
+		Stream:      streamWriter.isStreaming,
+	})
 
-	// Extract token counts and response content
+	// Extract token counts (response content no longer used for memory; we record raw)
 	inputTokens, outputTokens := streamWriter.GetTokenCounts()
-	assistantContent := streamWriter.GetAssistantContent()
 
 	// Get raw response content (JSON or SSE, depending on endpoint).
 	responseData := streamWriter.GetResponseContent()
@@ -182,7 +205,7 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 	}
 
 	if len(responseData) > 0 {
-		// Try to parse as JSON (non-streaming response)
+		// Try to parse as JSON for token counts (non-streaming response)
 		var respBody map[string]interface{}
 		if err := json.Unmarshal(responseData, &respBody); err == nil {
 			in, out := extractTokenCountsFromResponse(respBody)
@@ -191,9 +214,6 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 			}
 			if out > 0 {
 				outputTokens = out
-			}
-			if parsed := extractAssistantTextFromResponse(respBody); parsed != "" {
-				assistantContent = parsed
 			}
 		}
 	}
@@ -207,56 +227,82 @@ func (h *Handler) passthrough(w http.ResponseWriter, r *http.Request, pol *polic
 	}
 
 	if model != "" {
-		assistantForMemory := assistantContent
-		if assistantForMemory == "" {
-			assistantForMemory = formatResponseForMemory(responseData, "")
-		}
-		if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
-			if len(requestBody) > 0 {
-				if err := memWriter.Append(tokenHash, "request", model, string(requestBody)); err != nil {
+		// Record raw request/response with content-type and safe headers (no JSON transform)
+		if len(requestBody) > 0 {
+			reqMemory := formatRawForMemory("Request-Headers:", r.Header.Get("Content-Type"), r.Header, requestBody, maxMemoryContentSize)
+			if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+				if err := memWriter.Append(tokenHash, "request", model, reqMemory); err != nil {
 					debugLog("Passthrough: failed to write request memory: %v", err)
 				}
 			}
-			if assistantForMemory != "" {
-				if err := memWriter.Append(tokenHash, "response", model, assistantForMemory); err != nil {
-					debugLog("Passthrough: failed to write response memory: %v", err)
-				}
-			}
-			if userContent != "" {
-				if err := memWriter.Append(tokenHash, "user", model, userContent); err != nil {
-					debugLog("Passthrough: failed to write user memory: %v", err)
-				}
-			}
-			if assistantForMemory != "" {
-				if err := memWriter.Append(tokenHash, "assistant", model, assistantForMemory); err != nil {
-					debugLog("Passthrough: failed to write assistant memory: %v", err)
-				}
-			}
-		}
-
-		if h.ledger != nil {
-			if len(requestBody) > 0 {
-				if err := h.ledger.RecordMemory(tokenHash, "request", model, string(requestBody)); err != nil {
+			if h.ledger != nil {
+				if err := h.ledger.RecordMemory(tokenHash, "request", model, reqMemory); err != nil {
 					debugLog("Passthrough: failed to record request in ledger: %v", err)
 				}
 			}
-			if assistantForMemory != "" {
-				if err := h.ledger.RecordMemory(tokenHash, "response", model, assistantForMemory); err != nil {
+		}
+		if len(responseData) > 0 {
+			responseBodyForMemory := responseData
+			if strings.Contains(strings.ToLower(streamWriter.Header().Get("Content-Type")), "text/event-stream") {
+				payloads := extractSSEDataPayloads(responseData, 512)
+				responseBodyForMemory = []byte(formatSSEForMemory(payloads, streamWriter.GetAssistantContent(), streamWriter.IsTruncated()))
+			}
+			respMemory := formatRawForMemory("Response-Headers:", streamWriter.Header().Get("Content-Type"), streamWriter.Header(), responseBodyForMemory, maxMemoryContentSize)
+			if memWriter := h.getMemoryWriter(resolved.Memory); memWriter != nil {
+				if err := memWriter.Append(tokenHash, "response", model, respMemory); err != nil {
+					debugLog("Passthrough: failed to write response memory: %v", err)
+				}
+			}
+			if h.ledger != nil {
+				if err := h.ledger.RecordMemory(tokenHash, "response", model, respMemory); err != nil {
 					debugLog("Passthrough: failed to record response in ledger: %v", err)
-				}
-			}
-			if userContent != "" {
-				if err := h.ledger.RecordMemory(tokenHash, "user", model, userContent); err != nil {
-					debugLog("Passthrough: failed to record user in ledger: %v", err)
-				}
-			}
-			if assistantForMemory != "" {
-				if err := h.ledger.RecordMemory(tokenHash, "assistant", model, assistantForMemory); err != nil {
-					debugLog("Passthrough: failed to record assistant in ledger: %v", err)
 				}
 			}
 		}
 	}
+
+	if streamWriter.isStreaming {
+		payloads := extractSSEDataPayloads(responseData, 512)
+		for i, payload := range payloads {
+			chunkBody, chunkBytes := bodyForEvent(streamWriter.Header().Get("Content-Type"), []byte(payload), maxMemoryContentSize)
+			h.recordCommunicationEvent(ledger.CommunicationEvent{
+				Type:        ledger.CommunicationEventResponseChunk,
+				TokenHash:   safePrefix(tokenHash, 16),
+				Model:       model,
+				Provider:    providerName,
+				StatusCode:  lw.statusCode,
+				ContentType: streamWriter.Header().Get("Content-Type"),
+				Body:        chunkBody,
+				BodyBytes:   chunkBytes,
+				ChunkIndex:  i + 1,
+				Stream:      true,
+			})
+		}
+	}
+	respBodyForEvent, respBytes := bodyForEvent(streamWriter.Header().Get("Content-Type"), responseData, maxMemoryContentSize)
+	h.recordCommunicationEvent(ledger.CommunicationEvent{
+		Type:        ledger.CommunicationEventResponseBody,
+		TokenHash:   safePrefix(tokenHash, 16),
+		Model:       model,
+		Provider:    providerName,
+		StatusCode:  lw.statusCode,
+		ContentType: streamWriter.Header().Get("Content-Type"),
+		Headers:     cloneHeadersForEvent(streamWriter.Header()),
+		Body:        respBodyForEvent,
+		BodyBytes:   respBytes,
+		Stream:      streamWriter.isStreaming,
+	})
+	h.recordCommunicationEvent(ledger.CommunicationEvent{
+		Type:        ledger.CommunicationEventResponseDone,
+		TokenHash:   safePrefix(tokenHash, 16),
+		Model:       model,
+		Provider:    providerName,
+		StatusCode:  lw.statusCode,
+		ContentType: streamWriter.Header().Get("Content-Type"),
+		Headers:     cloneHeadersForEvent(streamWriter.Header()),
+		BodyBytes:   respBytes,
+		Stream:      streamWriter.isStreaming,
+	})
 }
 
 func extractUserContentFromRequest(reqBody map[string]interface{}) string {

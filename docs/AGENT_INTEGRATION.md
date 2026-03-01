@@ -28,7 +28,7 @@ export TOKENOMICS_KEY="tkn_<paste-your-token-here>"
 tokenomics run python my_script.py
 ```
 
-The `run` command defaults to plain HTTP on localhost, so no TLS certificates are needed for basic usage. If you enable TLS (`--tls`), see [TLS](TLS.md) for certificate setup.
+The `run` command defaults to HTTPS on localhost (`https://localhost:8443`). If needed for local development, you can disable TLS with `--tls=false`.
 
 The `run` command:
 - Auto-detects which provider to use (claude → anthropic, python → generic, etc.)
@@ -105,9 +105,10 @@ tokenomics run --proxy-url https://other-proxy.com:8443 claude "test"
 | `--proxy-url` | `$TOKENOMICS_PROXY_URL` | Remote proxy URL (if set, uses remote proxy instead of starting local) |
 | `--provider` | (auto-detected) | Override provider: `generic`, `anthropic`, `azure`, `gemini` |
 | `--host` | `localhost` | Proxy hostname (only used if starting local proxy) |
-| `--port` | `8080` | Proxy port (only used if starting local proxy) |
-| `--tls` | `false` | Use HTTPS scheme (default false for run, traffic is localhost only) |
+| `--port` | `8443` | Proxy port (only used if starting local proxy) |
+| `--tls` | `true` | Use HTTPS scheme (default true for run) |
 | `--insecure` | `false` | Skip TLS verification (only applies when --tls is enabled) |
+| `--print-env` | `false` | Print the environment variables injected by `tokenomics run` before launching the command |
 
 ## Manual Mode: `tokenomics start` + `tokenomics init`
 

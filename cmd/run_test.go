@@ -131,7 +131,7 @@ func TestRunCmd_Registration(t *testing.T) {
 }
 
 func TestRunCmd_Flags(t *testing.T) {
-	flags := []string{"token", "proxy-url", "host", "port", "tls", "insecure", "admin", "provider", "env-key", "env-base-url"}
+	flags := []string{"token", "proxy-url", "host", "port", "tls", "insecure", "admin", "print-env", "provider", "env-key", "env-base-url"}
 	for _, name := range flags {
 		if runCmd.Flags().Lookup(name) == nil {
 			t.Errorf("run command missing flag: %s", name)
@@ -147,6 +147,7 @@ func resetRunGlobals() func() {
 	prevRunTLS := runTLS
 	prevRunInsecure := runInsecure
 	prevRunAdmin := runAdmin
+	prevRunPrintEnv := runPrintEnv
 	prevRunProvider := runProvider
 	prevRunEnvKey := runEnvKey
 	prevRunEnvBase := runEnvBase
@@ -161,6 +162,7 @@ func resetRunGlobals() func() {
 		runTLS = prevRunTLS
 		runInsecure = prevRunInsecure
 		runAdmin = prevRunAdmin
+		runPrintEnv = prevRunPrintEnv
 		runProvider = prevRunProvider
 		runEnvKey = prevRunEnvKey
 		runEnvBase = prevRunEnvBase

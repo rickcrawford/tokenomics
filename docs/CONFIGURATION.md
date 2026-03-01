@@ -129,6 +129,7 @@ default_provider: ""           # Default provider when not specified in policy (
 ledger:
   enabled: true              # Enable per-session token tracking (stored in the main dir)
   memory: true               # Record conversation content in memory/ subdirectory
+  event_ledger: false        # Phase 1 rollout - structured request/response event capture
 ```
 
 ### Field Descriptions
@@ -185,10 +186,11 @@ ledger:
 | `default_provider` | (empty) | Default provider when not specified in policy (e.g. `openai`, `anthropic`). |
 | `ledger.enabled` | `true` | Enable per-session token tracking. Session files and memory logs are stored in the main `dir` setting. |
 | `ledger.memory` | `true` | Record conversation content (user/assistant messages) in memory markdown files under `{dir}/memory/`. |
+| `ledger.event_ledger` | `false` | Enable structured request/response communication events in session JSON (`communication_events`) and event-formatted memory entries. Keep disabled by default during dual-write rollout. |
 
 ### Session Ledger Notes
 
-Session request entries are accumulated in memory for the current process and written to `sessions/*.json` on graceful shutdown. Conversation memory entries are streamed to markdown files as they happen.
+Session request entries are accumulated in memory for the current process and written to `sessions/*.json` on graceful shutdown. Conversation memory entries are streamed to markdown files as they happen. When `ledger.event_ledger` is enabled, request/response communication events are also recorded with sanitized headers and bounded payload samples.
 
 If the process crashes or is terminated without shutdown handling, the in-memory request rollup for that run can be lost.
 
@@ -269,6 +271,7 @@ Every config field can be overridden with a `TOKENOMICS_` prefixed environment v
 | `remote.insecure` | `TOKENOMICS_REMOTE_INSECURE` |
 | `ledger.enabled` | `TOKENOMICS_LEDGER_ENABLED` |
 | `ledger.memory` | `TOKENOMICS_LEDGER_MEMORY` |
+| `ledger.event_ledger` | `TOKENOMICS_LEDGER_EVENT_LEDGER` |
 
 Example:
 

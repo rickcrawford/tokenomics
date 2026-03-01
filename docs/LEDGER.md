@@ -10,6 +10,7 @@ dir: "~/.tokenomics"    # base directory (default)
 ledger:
   enabled: true         # enable session ledger (default)
   memory: true          # record conversation content (default)
+  event_ledger: false   # structured communication events (default off, dual-write phase)
 ```
 
 Or via environment variables:
@@ -17,6 +18,7 @@ Or via environment variables:
 ```bash
 export TOKENOMICS_LEDGER_ENABLED=true
 export TOKENOMICS_LEDGER_MEMORY=true
+export TOKENOMICS_LEDGER_EVENT_LEDGER=true
 ```
 
 Note: The ledger directory is determined by the `dir` setting and cannot be overridden. Session files and memory logs are stored under `{dir}/sessions/` and `{dir}/memory/` respectively.
@@ -39,9 +41,10 @@ Memory files live in a separate directory so teams can `.gitignore` them indepen
 
 1. Proxy starts, ledger opens a new session, snapshots git branch and HEAD commit
 2. Every proxied request is recorded with token counts, provider metadata, and timing
-3. Conversation content (user/assistant) is optionally written to a memory markdown file
-4. On shutdown, the ledger computes rollups and writes the session JSON
-5. Optionally commit session artifacts if your workflow tracks usage in git
+3. Raw request/response (with content-type and safe headers) is optionally written to a memory markdown file
+4. Optional communication events (`request.received`, `response.*`) are captured when `ledger.event_ledger: true`
+5. On shutdown, the ledger computes rollups and writes the session JSON
+6. Optionally commit session artifacts if your workflow tracks usage in git
 
 ## Session JSON Format
 
@@ -73,7 +76,8 @@ Memory files live in a separate directory so teams can `.gitignore` them indepen
   "by_model": { ... },
   "by_provider": { ... },
   "by_token": { ... },
-  "requests": [ ... ]
+  "requests": [ ... ],
+  "communication_events": [ ... ]
 }
 ```
 
@@ -135,6 +139,29 @@ Three rollup maps aggregate tokens for different analysis needs.
 | `rule_matches` | Content rule matches (warn, log, mask) |
 | `metadata` | Policy metadata tags (team, project, cost_center) |
 | `provider_meta` | Provider response metadata (see below) |
+
+### Communication Events (Optional)
+
+When `ledger.event_ledger` is enabled, `communication_events` captures bounded request/response communication details for debugging and replay.
+
+| Field | Description |
+|-------|-------------|
+| `timestamp` | Event time (RFC3339) |
+| `type` | `request.received`, `response.started`, `response.chunk`, `response.body`, `response.completed`, `response.error` |
+| `token_hash` | Token hash prefix |
+| `model` | Model used for the request/attempt |
+| `provider` | Provider name |
+| `method` | HTTP method (request events) |
+| `path` | HTTP path (request events) |
+| `status_code` | Upstream status code when known |
+| `content_type` | Request/response content type |
+| `headers` | Sanitized headers (auth and API key headers removed) |
+| `body` | Bounded payload sample, or `[binary]` marker |
+| `body_bytes` | Original payload size before truncation |
+| `chunk_index` | 1-based chunk index for `response.chunk` |
+| `stream` | Whether request used streaming |
+| `retry_count` | Retry count at event emission time |
+| `error` | Error text for `response.error` |
 
 ### Provider Metadata
 
@@ -244,18 +271,34 @@ tokenomics ledger show a1b2 --json
 
 ## Memory Files
 
-When `ledger.memory: true`, conversation content is written to `memory/<date>_<session_id>.md`, so each proxy run has one memory file:
+When `ledger.memory: true`, request and response data are written to `memory/<date>_<session_id>.md`. Each entry records raw request or response with no JSON transformation: Content-Type, safe headers (Authorization and API-key headers are stripped), and body. For binary or non-UTF-8 bodies, the body is recorded as `[binary, N bytes]` so you can inspect content-type and headers and decide later what to extract.
+
+When `ledger.event_ledger: true`, event entries are also written to memory with `Event: <type>` blocks. This is additive in the dual-write rollout phase.
+
+Example shape:
 
 ```markdown
-## 2026-02-25T10:30:05Z | a1b2c3d4 | user | claude-sonnet-4-20250514
+## 2026-02-25T10:30:05Z | a1b2c3d4 | request | claude-sonnet-4-20250514
 
-Write a function that validates email addresses.
+Content-Type: application/json
+Request-Headers:
+  Accept: application/json
+  Content-Type: application/json
+
+Body:
+{"model":"claude-sonnet-4","messages":[...]}
 
 ---
 
-## 2026-02-25T10:30:08Z | a1b2c3d4 | assistant | claude-sonnet-4-20250514
+## 2026-02-25T10:30:08Z | a1b2c3d4 | response | claude-sonnet-4-20250514
 
-Here's a function that validates email addresses...
+Content-Type: application/json
+Response-Headers:
+  Content-Type: application/json
+  X-Request-Id: ...
+
+Body:
+{"id":"msg_...","content":[...],"usage":{...}}
 
 ---
 ```
