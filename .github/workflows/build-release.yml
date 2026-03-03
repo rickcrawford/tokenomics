@@ -27,11 +27,17 @@ jobs:
           set -euo pipefail
           mkdir -p dist
 
+          # Compute build variables
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+          COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+          DATE=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          LDFLAGS="-s -w -X github.com/rickcrawford/tokenomics/cmd.Version=${VERSION} -X github.com/rickcrawford/tokenomics/cmd.Commit=${COMMIT} -X github.com/rickcrawford/tokenomics/cmd.BuildDate=${DATE}"
+
           build_unix() {
             local goos="$1"
             local goarch="$2"
             local out="tokenomics-${goos}-${goarch}"
-            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" go build -trimpath -ldflags="-s -w" -o dist/tokenomics .
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" go build -trimpath -ldflags="${LDFLAGS}" -o dist/tokenomics .
             tar -czf "dist/${out}.tar.gz" -C dist tokenomics
             rm -f dist/tokenomics
           }
@@ -39,7 +45,7 @@ jobs:
           build_windows() {
             local goarch="$1"
             local out="tokenomics-windows-${goarch}"
-            CGO_ENABLED=0 GOOS=windows GOARCH="${goarch}" go build -trimpath -ldflags="-s -w" -o dist/tokenomics.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH="${goarch}" go build -trimpath -ldflags="${LDFLAGS}" -o dist/tokenomics.exe .
             (cd dist && zip -q "${out}.zip" tokenomics.exe)
             rm -f dist/tokenomics.exe
           }
