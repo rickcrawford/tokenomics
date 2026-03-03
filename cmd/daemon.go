@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,8 +9,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"time"
-
-	"github.com/rickcrawford/tokenomics/internal/config"
 )
 
 // daemonConfig holds settings for starting the proxy as a background process.
@@ -204,40 +201,10 @@ func daemonHealthClient(dc daemonConfig) *http.Client {
 		return client
 	}
 
-	// Strict by default: trust Tokenomics local CA when available.
-	caPath := ""
-	cfg, err := config.Load(cfgFile)
-	if err == nil && cfg != nil {
-		dir := cfg.Dir
-		if dirOverride != "" {
-			dir = dirOverride
-			if !filepath.IsAbs(dir) {
-				if abs, err := filepath.Abs(dir); err == nil {
-					dir = abs
-				}
-			}
-		}
-		certDir := cfg.Server.TLS.CertDir
-		if certDir == "" || certDir == "./certs" {
-			certDir = filepath.Join(dir, "certs")
-		}
-		caPath = filepath.Join(certDir, "ca.crt")
-	}
-	if caPath == "" {
-		if homeDir, err := os.UserHomeDir(); err == nil {
-			caPath = filepath.Join(homeDir, ".tokenomics", "certs", "ca.crt")
-		}
-	}
-
-	if caPath != "" {
-		if pemData, err := os.ReadFile(caPath); err == nil {
-			pool := x509.NewCertPool()
-			if pool.AppendCertsFromPEM(pemData) {
-				tlsCfg.RootCAs = pool
-			}
-		}
-	}
-
+	// For startup health checks, skip cert validation since the certs may not exist yet.
+	// The serve process will generate them. We trust localhost TLS here since we're
+	// checking a local proxy we just spawned.
+	tlsCfg.InsecureSkipVerify = true
 	client.Transport = &http.Transport{TLSClientConfig: tlsCfg}
 	return client
 }

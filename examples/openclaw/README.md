@@ -44,7 +44,7 @@ docker-compose up -d
 
 # Option B: Manual setup
 export $(cat .env | xargs)
-../../bin/tokenomics --dir ~/.tokenomics serve
+tokenomics serve --dir ~/.tokenomics
 ```
 
 Verify tokenomics is running:
