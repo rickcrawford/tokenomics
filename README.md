@@ -6,6 +6,11 @@
    |_|\___/|_|\_\___|_| |_|\___/|_| |_| |_|_|\___|___/
 ```
 
+[![GitHub Stars](https://img.shields.io/github/stars/rickcrawford/tokenomics?style=flat-square&label=Stars&color=blue)](https://github.com/rickcrawford/tokenomics)
+[![MIT License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/rickcrawford/tokenomics?style=flat-square&color=orange)](https://github.com/rickcrawford/tokenomics/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/rickcrawford/tokenomics?style=flat-square)](go.mod)
+
 > **Personal Guardrails for Token Usage** - Safety first (PII, prompts, rules), then scoped tokens with request and cost controls.
 
 Tokenomics is an OpenAI-compatible reverse proxy you run yourself. It gives you the features of an AI gateway (guardrails, budgets, rate limits, multi-provider routing) but under your control from your client. No vendor lock-in, no sending traffic through a third party. Issue scoped wrapper tokens instead of raw API keys; each token enforces what models, content, and spend are allowed.
@@ -15,6 +20,22 @@ One binary. Zero code changes. Drop it in front of any agent that speaks the Ope
 ---
 
 **Created by [Rick Crawford](https://github.com/rickcrawford)** • [LinkedIn](https://www.linkedin.com/in/rickcrawford/) • [MIT License](LICENSE)
+
+---
+
+## Keywords
+`ai-proxy` • `llm-gateway` • `token-budgeting` • `cost-control` • `safety-guardrails` • `prompt-injection-detection` • `multi-provider-routing` • `rate-limiting` • `pii-masking` • `api-gateway` • `openai-compatible` • `agent-security`
+
+---
+
+## Table of Contents
+- [What It Does](#what-it-does)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Features](#features)
+- [Use Cases](#use-cases)
+- [Documentation](#documentation)
+- [OpenClaw Integration](#openclaw-integration)
 
 ---
 
@@ -142,6 +163,26 @@ See [examples/](examples/) for provider configs, sample policies, and an end-to-
 | **Observability** | Webhooks | Events for violations, budget alerts, rate limits |
 | **Security** | Encryption | AES-256-GCM at-rest encryption for policies |
 | **Security** | Token isolation | Scoped wrapper tokens instead of raw API keys |
+
+## Use Cases
+
+**AI Safety & Compliance Teams**
+Enforce content policies, detect prompt injection, mask PII, and maintain audit logs for regulated environments.
+
+**Multi-Tenant SaaS Platforms**
+Issue scoped tokens to customers with per-customer budgets, rate limits, and model restrictions. Track costs per tenant.
+
+**Agent Fleet Operators**
+Deploy 100+ autonomous agents with unified cost controls, safety guardrails, and usage tracking across your entire fleet.
+
+**Cost-Conscious Development Teams**
+Set monthly budgets, prevent runaway spend with fallback providers, and analyze cost-per-feature using git context.
+
+**LLM Experimentation**
+Switch between providers (OpenAI, Anthropic, Groq) without code changes. A/B test models and track costs.
+
+**Enterprise API Management**
+Replace expensive third-party gateways with a single binary you control. No vendor lock-in, no traffic routing through third parties.
 
 ## Documentation
 
