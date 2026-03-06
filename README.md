@@ -23,11 +23,6 @@ One binary. Zero code changes. Drop it in front of any agent that speaks the Ope
 
 ---
 
-## Keywords
-`ai-proxy` • `llm-gateway` • `token-budgeting` • `cost-control` • `safety-guardrails` • `prompt-injection-detection` • `multi-provider-routing` • `rate-limiting` • `pii-masking` • `api-gateway` • `openai-compatible` • `agent-security`
-
----
-
 ## Table of Contents
 - [What It Does](#what-it-does)
 - [Installation](#installation)
